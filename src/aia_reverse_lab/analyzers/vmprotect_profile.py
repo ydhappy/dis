@@ -28,9 +28,11 @@ def build_vmprotect_profile(
     entry_point: str,
     overlay_size: int,
     pe_features: dict[str, Any] | None = None,
+    crypto_analysis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a VMProtect-aware static profile without unpacking or bypassing protections."""
     pe_features = pe_features or {}
+    crypto_analysis = crypto_analysis or {}
     evidence: list[dict[str, Any]] = []
     score = 0
 
@@ -80,6 +82,20 @@ def build_vmprotect_profile(
         points = 12
         score += points
         evidence.append(evidence_item(points, "medium", "imports", "Sparse import table", f"Import count is {import_count}."))
+
+    crypto_summary = crypto_analysis.get("summary", {})
+    if crypto_summary.get("has_high_entropy_regions"):
+        points = min(12, 4 + int(crypto_analysis.get("high_entropy_region_count", 0) or 0))
+        score += points
+        evidence.append(evidence_item(points, "medium", "crypto_entropy", "High-entropy crypto/packed regions", f"regions={crypto_analysis.get('high_entropy_region_count', 0)}"))
+    if crypto_summary.get("uses_crypto_api"):
+        points = min(10, 3 + int(crypto_analysis.get("crypto_api_count", 0) or 0))
+        score += points
+        evidence.append(evidence_item(points, "low", "crypto_api", "Crypto API usage correlation", f"apis={crypto_analysis.get('crypto_api_count', 0)}"))
+    if crypto_summary.get("has_crypto_constants"):
+        points = min(10, 4 + int(crypto_analysis.get("constant_count", 0) or 0))
+        score += points
+        evidence.append(evidence_item(points, "low", "crypto_constants", "Crypto constant markers", f"constants={crypto_analysis.get('constant_count', 0)}"))
 
     string_hits = collect_string_hits(strings)
     if string_hits:
@@ -131,14 +147,20 @@ def build_vmprotect_profile(
         "section_anomaly_count": len(section_anomalies),
         "tls_present": bool(tls_info.get("present")),
         "tls_callback_count": int(tls_info.get("callback_count", 0) or 0),
+        "crypto_correlation": {
+            "crypto_api_count": crypto_analysis.get("crypto_api_count", 0),
+            "constant_count": crypto_analysis.get("constant_count", 0),
+            "encoded_candidate_count": crypto_analysis.get("encoded_candidate_count", 0),
+            "high_entropy_region_count": crypto_analysis.get("high_entropy_region_count", 0),
+        },
         "evidence": evidence,
         "analyst_notes": build_analyst_notes(classification),
         "safe_next_steps": [
             "Review section entropy, permissions, and EntryPoint section mapping.",
+            "Review crypto indicators and high-entropy regions.",
             "Review EntryPoint disassembly and static flow summary.",
             "Compare with an authorized unprotected build using safe binary diff mode.",
             "Run YARA rules for known packer/protector indicators.",
-            "Execute only inside an isolated lab if dynamic behavior analysis is required.",
         ],
     }
 
@@ -157,19 +179,16 @@ def collect_string_hits(strings: list[dict[str, Any]]) -> list[str]:
 def estimate_vm_dispatcher_pattern(disassembly: list[dict[str, Any]]) -> dict[str, Any]:
     if not disassembly:
         return {"score": 0, "severity": "info", "detail": "No disassembly available."}
-
     window = disassembly[:100]
     mnemonic_counts: dict[str, int] = {}
     for instruction in window:
         mnemonic = str(instruction.get("mnemonic", "")).lower()
         mnemonic_counts[mnemonic] = mnemonic_counts.get(mnemonic, 0) + 1
-
     dispatcher_like_count = sum(mnemonic_counts.get(item, 0) for item in VM_DISPATCHER_MNEMONICS)
     branch_count = sum(count for mnemonic, count in mnemonic_counts.items() if mnemonic.startswith("j") or mnemonic in {"jmp", "call"})
     stack_count = sum(mnemonic_counts.get(item, 0) for item in {"push", "pop"})
     bitwise_count = sum(mnemonic_counts.get(item, 0) for item in {"xor", "rol", "ror", "shl", "shr", "and", "or"})
     ratio = dispatcher_like_count / len(window) if window else 0.0
-
     if ratio >= 0.45 and branch_count >= 8 and (stack_count >= 4 or bitwise_count >= 4):
         return {"score": 16, "severity": "medium", "detail": f"ratio={ratio:.2f}, branch/call={branch_count}, stack={stack_count}, bitwise={bitwise_count}."}
     if ratio >= 0.35 and branch_count >= 5:
@@ -196,7 +215,7 @@ def build_analyst_notes(classification: str) -> str:
     if classification == "vmprotect_likely":
         return "Strong VMProtect indicators were found. This profile is for triage/reporting only and does not unpack or bypass protection."
     if classification == "vmprotect_possible":
-        return "Some VMProtect-like indicators were found. Correlate with YARA results, section layout, and authorized build comparison."
+        return "Some VMProtect-like indicators were found. Correlate with YARA results, section layout, crypto indicators, and authorized build comparison."
     if classification == "protected_or_packed_likely":
         return "The binary appears packed/protected, but current evidence is not VMProtect-specific."
     return "Current static indicators do not strongly suggest VMProtect."
