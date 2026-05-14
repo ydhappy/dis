@@ -49,8 +49,40 @@ def print_summary(result) -> None:
     summary.add_row("Sections", str(result.section_count))
     summary.add_row("Imports", str(result.import_count))
     summary.add_row("Exports", str(result.export_count))
+    summary.add_row("Overlay", f"{result.overlay_size:,} bytes")
+    summary.add_row("Strings", str(len(result.strings)))
+    summary.add_row("Suspicious APIs", str(len(result.suspicious_apis)))
+    summary.add_row("Protector Findings", str(len(result.protector_findings)))
 
     console.print(summary)
+
+    if result.protector_findings:
+        protector_table = Table(title="Protector / Packer Indicators")
+        protector_table.add_column("Name", style="magenta")
+        protector_table.add_column("Confidence", style="cyan")
+        protector_table.add_column("Reason", style="white")
+        for finding in result.protector_findings[:10]:
+            protector_table.add_row(
+                str(finding.get("name", "unknown")),
+                str(finding.get("confidence", "unknown")),
+                str(finding.get("reason", "")),
+            )
+        console.print(protector_table)
+
+    if result.suspicious_apis:
+        api_table = Table(title="Suspicious API Indicators")
+        api_table.add_column("Severity", style="red")
+        api_table.add_column("Category", style="cyan")
+        api_table.add_column("DLL", style="white")
+        api_table.add_column("Function", style="white")
+        for item in result.suspicious_apis[:15]:
+            api_table.add_row(
+                item.get("severity", ""),
+                item.get("category", ""),
+                item.get("dll", ""),
+                item.get("function", ""),
+            )
+        console.print(api_table)
 
     if result.warnings:
         console.print("[yellow]Warnings[/yellow]")
@@ -90,7 +122,7 @@ def main() -> int:
 
     console.print("[bold cyan]AIA Reverse Lab[/bold cyan]")
     print_summary(result)
-    console.print("[green]Step 3 PE core analysis completed.[/green]")
+    console.print("[green]Step 4 static enrichment completed.[/green]")
     console.print("[yellow]JSON/HTML report output will be added in Step 5.[/yellow]")
     return 0
 
