@@ -23,6 +23,11 @@ class SectionInfo:
     raw_pointer: str
     characteristics: str
     entropy: float
+    executable: bool = False
+    readable: bool = False
+    writable: bool = False
+    rwx: bool = False
+    contains_entrypoint: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -62,6 +67,7 @@ class PEAnalysisResult:
     import_count: int
     export_count: int
     overlay_size: int = 0
+    pe_features: dict[str, Any] = field(default_factory=dict)
     sections: list[SectionInfo] = field(default_factory=list)
     imports: list[ImportInfo] = field(default_factory=list)
     exports: list[ExportInfo] = field(default_factory=list)
@@ -92,6 +98,7 @@ class PEAnalysisResult:
             "import_count": self.import_count,
             "export_count": self.export_count,
             "overlay_size": self.overlay_size,
+            "pe_features": dict(self.pe_features),
             "sections": [section.to_dict() for section in self.sections],
             "imports": [item.to_dict() for item in self.imports],
             "exports": [item.to_dict() for item in self.exports],
