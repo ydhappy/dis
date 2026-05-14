@@ -32,6 +32,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="SQLite database path. Default: aia_reverse_lab.sqlite3",
     )
     parser.add_argument(
+        "--yara-rules",
+        default=None,
+        help="Optional YARA rule file or directory to scan with.",
+    )
+    parser.add_argument(
         "--recent",
         action="store_true",
         help="Show recent analyses from the SQLite database and exit.",
@@ -59,6 +64,7 @@ def print_recent(rows: list[dict]) -> None:
     table.add_column("SHA256", style="magenta")
     table.add_column("Suspicious APIs", style="red")
     table.add_column("Protector", style="yellow")
+    table.add_column("YARA", style="magenta")
 
     for row in rows:
         table.add_row(
@@ -69,6 +75,7 @@ def print_recent(rows: list[dict]) -> None:
             str(row["sha256"]),
             str(row["suspicious_api_count"]),
             str(row["protector_finding_count"]),
+            str(row.get("yara_match_count", 0)),
         )
     console.print(table)
 
@@ -94,6 +101,7 @@ def print_summary(result) -> None:
     summary.add_row("Strings", str(len(result.strings)))
     summary.add_row("Suspicious APIs", str(len(result.suspicious_apis)))
     summary.add_row("Protector Findings", str(len(result.protector_findings)))
+    summary.add_row("YARA Matches", str(len(result.yara_matches)))
 
     console.print(summary)
 
@@ -109,6 +117,21 @@ def print_summary(result) -> None:
                 str(finding.get("reason", "")),
             )
         console.print(protector_table)
+
+    if result.yara_matches:
+        yara_table = Table(title="YARA Matches")
+        yara_table.add_column("Rule", style="magenta")
+        yara_table.add_column("Namespace", style="cyan")
+        yara_table.add_column("Tags", style="white")
+        yara_table.add_column("Strings", style="white")
+        for item in result.yara_matches[:15]:
+            yara_table.add_row(
+                str(item.get("rule", "")),
+                str(item.get("namespace", "")),
+                ", ".join(item.get("tags", [])),
+                str(item.get("string_match_count", 0)),
+            )
+        console.print(yara_table)
 
     if result.suspicious_apis:
         api_table = Table(title="Suspicious API Indicators")
@@ -160,7 +183,7 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        result = PEAnalyzer().analyze(target)
+        result = PEAnalyzer().analyze(target, yara_rules=args.yara_rules)
         report_paths = write_reports(result, output_dir)
         analysis_id = db.insert_analysis(result, report_paths)
     except pefile.PEFormatError as exc:
@@ -172,7 +195,7 @@ def main() -> int:
 
     console.print("[bold cyan]AIA Reverse Lab[/bold cyan]")
     print_summary(result)
-    console.print("[green]Step 6 SQLite storage completed.[/green]")
+    console.print("[green]Step 7 YARA scanning completed.[/green]")
     console.print(f"Analysis ID : {analysis_id}")
     console.print(f"Database    : {Path(args.db)}")
     console.print(f"JSON Report : {report_paths['json']}")
