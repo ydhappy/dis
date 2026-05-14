@@ -16,6 +16,7 @@ from aia_reverse_lab.analyzers.disassembler import (
     disassemble_entry_point,
 )
 from aia_reverse_lab.analyzers.flow_summary import build_flow_summary
+from aia_reverse_lab.analyzers.pe_features import build_pe_features, decode_section_permissions
 from aia_reverse_lab.analyzers.protector_detector import detect_overlay_size, detect_protectors
 from aia_reverse_lab.analyzers.risk_scorer import score_analysis
 from aia_reverse_lab.analyzers.string_analyzer import extract_strings
@@ -125,7 +126,15 @@ class PEAnalyzer:
         pe = pefile.PE(str(path), fast_load=False)
 
         try:
-            sections = self._extract_sections(pe)
+            machine_value = pe.FILE_HEADER.Machine
+            subsystem_value = pe.OPTIONAL_HEADER.Subsystem
+            image_base = pe.OPTIONAL_HEADER.ImageBase
+            entry_point_rva = pe.OPTIONAL_HEADER.AddressOfEntryPoint
+            entry_point_va = image_base + entry_point_rva
+            entry_point = f"0x{entry_point_va:X}"
+
+            sections = self._extract_sections(pe, entry_point_rva=entry_point_rva)
+            pe_features = build_pe_features(pe, sections, entry_point_rva, image_base)
             imports = self._extract_imports(pe)
             exports = self._extract_exports(pe)
             strings = extract_strings(path)
@@ -149,14 +158,6 @@ class PEAnalyzer:
                     warnings.append(str(exc))
 
             flow_summary = build_flow_summary(disassembly)
-
-            machine_value = pe.FILE_HEADER.Machine
-            subsystem_value = pe.OPTIONAL_HEADER.Subsystem
-            image_base = pe.OPTIONAL_HEADER.ImageBase
-            entry_point_rva = pe.OPTIONAL_HEADER.AddressOfEntryPoint
-            entry_point_va = image_base + entry_point_rva
-            entry_point = f"0x{entry_point_va:X}"
-
             vmprotect_profile = build_vmprotect_profile(
                 sections=sections,
                 imports=imports,
@@ -166,6 +167,7 @@ class PEAnalyzer:
                 disassembly=disassembly,
                 entry_point=entry_point,
                 overlay_size=overlay_size,
+                pe_features=pe_features,
             )
 
             risk = score_analysis(
@@ -186,6 +188,10 @@ class PEAnalyzer:
                 warnings.append("No sections were found.")
             if overlay_size:
                 warnings.append(f"Overlay data detected: {overlay_size:,} bytes.")
+            if pe_features.get("tls", {}).get("present"):
+                warnings.append("TLS directory is present.")
+            if pe_features.get("section_anomaly_count", 0):
+                warnings.append(f"Section anomalies detected: {pe_features.get('section_anomaly_count')}.")
             if protector_findings:
                 warnings.append("Packer/protector indicators were detected.")
             if vmprotect_profile.get("classification") in {"vmprotect_likely", "vmprotect_possible"}:
@@ -215,6 +221,7 @@ class PEAnalyzer:
                 import_count=sum(len(item.functions) for item in imports),
                 export_count=len(exports),
                 overlay_size=overlay_size,
+                pe_features=pe_features,
                 sections=sections,
                 imports=imports,
                 exports=exports,
@@ -234,10 +241,14 @@ class PEAnalyzer:
         finally:
             pe.close()
 
-    def _extract_sections(self, pe: pefile.PE) -> list[SectionInfo]:
+    def _extract_sections(self, pe: pefile.PE, entry_point_rva: int) -> list[SectionInfo]:
         sections: list[SectionInfo] = []
         for section in pe.sections:
             raw_data = section.get_data()
+            permissions = decode_section_permissions(int(section.Characteristics))
+            start = int(section.VirtualAddress)
+            size = max(int(section.Misc_VirtualSize), int(section.SizeOfRawData), 1)
+            contains_entrypoint = start <= entry_point_rva < start + size
             sections.append(
                 SectionInfo(
                     name=decode_section_name(section.Name),
@@ -247,6 +258,11 @@ class PEAnalyzer:
                     raw_pointer=f"0x{section.PointerToRawData:X}",
                     characteristics=f"0x{section.Characteristics:X}",
                     entropy=calculate_entropy(raw_data),
+                    executable=permissions["executable"],
+                    readable=permissions["readable"],
+                    writable=permissions["writable"],
+                    rwx=permissions["rwx"],
+                    contains_entrypoint=contains_entrypoint,
                 )
             )
         return sections
