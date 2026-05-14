@@ -9,6 +9,7 @@ import pefile
 
 from aia_reverse_lab.analyzers.anti_analysis import detect_anti_analysis
 from aia_reverse_lab.analyzers.api_classifier import classify_imports
+from aia_reverse_lab.analyzers.crypto_analyzer import analyze_crypto_features
 from aia_reverse_lab.analyzers.data_requirements import analyze_required_data
 from aia_reverse_lab.analyzers.disassembler import (
     CapstoneUnavailableError,
@@ -60,24 +61,20 @@ def calculate_hashes(path: Path) -> FileHashes:
     md5 = hashlib.md5()  # noqa: S324 - non-security hash for file identity only
     sha1 = hashlib.sha1()  # noqa: S324 - non-security hash for file identity only
     sha256 = hashlib.sha256()
-
     with path.open("rb") as file:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
             md5.update(chunk)
             sha1.update(chunk)
             sha256.update(chunk)
-
     return FileHashes(md5=md5.hexdigest(), sha1=sha1.hexdigest(), sha256=sha256.hexdigest())
 
 
 def calculate_entropy(data: bytes) -> float:
     if not data:
         return 0.0
-
     counts = [0] * 256
     for byte in data:
         counts[byte] += 1
-
     entropy = 0.0
     length = len(data)
     for count in counts:
@@ -124,7 +121,6 @@ class PEAnalyzer:
         file_size = path.stat().st_size
         hashes = calculate_hashes(path)
         pe = pefile.PE(str(path), fast_load=False)
-
         try:
             machine_value = pe.FILE_HEADER.Machine
             subsystem_value = pe.OPTIONAL_HEADER.Subsystem
@@ -138,6 +134,7 @@ class PEAnalyzer:
             imports = self._extract_imports(pe)
             exports = self._extract_exports(pe)
             strings = extract_strings(path)
+            crypto_analysis = analyze_crypto_features(path, imports, strings)
             suspicious_apis = classify_imports(imports)
             overlay_size = detect_overlay_size(pe, file_size)
             protector_findings = detect_protectors(sections, imports, strings, overlay_size)
@@ -168,6 +165,7 @@ class PEAnalyzer:
                 entry_point=entry_point,
                 overlay_size=overlay_size,
                 pe_features=pe_features,
+                crypto_analysis=crypto_analysis,
             )
 
             risk = score_analysis(
@@ -185,14 +183,16 @@ class PEAnalyzer:
 
             if not imports:
                 warnings.append("No import table was found or import table is empty.")
-            if not sections:
-                warnings.append("No sections were found.")
             if overlay_size:
                 warnings.append(f"Overlay data detected: {overlay_size:,} bytes.")
             if pe_features.get("tls", {}).get("present"):
                 warnings.append("TLS directory is present.")
             if pe_features.get("section_anomaly_count", 0):
                 warnings.append(f"Section anomalies detected: {pe_features.get('section_anomaly_count')}.")
+            if crypto_analysis.get("summary", {}).get("has_high_entropy_regions"):
+                warnings.append(f"High-entropy crypto/packed regions detected: {crypto_analysis.get('high_entropy_region_count', 0)}.")
+            if crypto_analysis.get("crypto_api_count", 0):
+                warnings.append(f"Crypto API indicators detected: {crypto_analysis.get('crypto_api_count', 0)}.")
             if protector_findings:
                 warnings.append("Packer/protector indicators were detected.")
             if vmprotect_profile.get("classification") in {"vmprotect_likely", "vmprotect_possible"}:
@@ -227,6 +227,7 @@ class PEAnalyzer:
                 imports=imports,
                 exports=exports,
                 strings=strings,
+                crypto_analysis=crypto_analysis,
                 suspicious_apis=suspicious_apis,
                 protector_findings=protector_findings,
                 vmprotect_profile=vmprotect_profile,
@@ -272,7 +273,6 @@ class PEAnalyzer:
         imports: list[ImportInfo] = []
         if not hasattr(pe, "DIRECTORY_ENTRY_IMPORT"):
             return imports
-
         for entry in pe.DIRECTORY_ENTRY_IMPORT:
             dll_name = entry.dll.decode("utf-8", errors="replace") if entry.dll else "<unknown>"
             functions: list[str] = []
@@ -288,7 +288,6 @@ class PEAnalyzer:
         exports: list[ExportInfo] = []
         if not hasattr(pe, "DIRECTORY_ENTRY_EXPORT"):
             return exports
-
         for symbol in pe.DIRECTORY_ENTRY_EXPORT.symbols:
             name = symbol.name.decode("utf-8", errors="replace") if symbol.name else "<anonymous>"
             exports.append(
