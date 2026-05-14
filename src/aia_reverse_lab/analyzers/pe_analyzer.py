@@ -18,6 +18,7 @@ from aia_reverse_lab.analyzers.disassembler import (
 )
 from aia_reverse_lab.analyzers.flow_summary import build_flow_summary
 from aia_reverse_lab.analyzers.pe_features import build_pe_features, decode_section_permissions
+from aia_reverse_lab.analyzers.problem_locator import locate_static_problems
 from aia_reverse_lab.analyzers.protector_detector import detect_overlay_size, detect_protectors
 from aia_reverse_lab.analyzers.risk_scorer import score_analysis
 from aia_reverse_lab.analyzers.string_analyzer import extract_strings
@@ -238,6 +239,7 @@ class PEAnalyzer:
                 risk=risk,
                 warnings=warnings,
             )
+            result.problem_locations = locate_static_problems(result)
             result.data_requirements = analyze_required_data(result)
             return result
         finally:
