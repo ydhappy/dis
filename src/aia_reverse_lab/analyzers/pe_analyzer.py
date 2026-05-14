@@ -14,6 +14,7 @@ from aia_reverse_lab.analyzers.disassembler import (
     disassemble_entry_point,
 )
 from aia_reverse_lab.analyzers.protector_detector import detect_overlay_size, detect_protectors
+from aia_reverse_lab.analyzers.risk_scorer import score_analysis
 from aia_reverse_lab.analyzers.string_analyzer import extract_strings
 from aia_reverse_lab.analyzers.yara_scanner import YaraUnavailableError, scan_with_yara
 from aia_reverse_lab.models import (
@@ -142,6 +143,17 @@ class PEAnalyzer:
                 except (CapstoneUnavailableError, UnsupportedArchitectureError) as exc:
                     warnings.append(str(exc))
 
+            risk = score_analysis(
+                sections=sections,
+                imports=imports,
+                suspicious_apis=suspicious_apis,
+                protector_findings=protector_findings,
+                yara_matches=yara_matches,
+                overlay_size=overlay_size,
+                strings=strings,
+                disassembly=disassembly,
+            )
+
             machine_value = pe.FILE_HEADER.Machine
             subsystem_value = pe.OPTIONAL_HEADER.Subsystem
             image_base = pe.OPTIONAL_HEADER.ImageBase
@@ -183,6 +195,7 @@ class PEAnalyzer:
                 protector_findings=protector_findings,
                 yara_matches=yara_matches,
                 disassembly=disassembly,
+                risk=risk,
                 warnings=warnings,
             )
         finally:
