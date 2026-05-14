@@ -84,12 +84,7 @@ def save_tool_json(payload: dict, path: str | None) -> None:
 
 def run_dump_view_mode(args) -> int:
     try:
-        result = view_binary_range(
-            args.dump_view,
-            offset=parse_dump_integer(args.dump_offset),
-            length=parse_dump_integer(args.dump_length, 256),
-            width=args.dump_width,
-        )
+        result = view_binary_range(args.dump_view, offset=parse_dump_integer(args.dump_offset), length=parse_dump_integer(args.dump_length, 256), width=args.dump_width)
     except (OSError, ValueError) as exc:
         console.print(f"[red]Dump view failed:[/red] {exc}")
         return 2
@@ -107,11 +102,7 @@ def run_dump_view_mode(args) -> int:
 
 def run_memory_dump_mode(args) -> int:
     try:
-        result = analyze_memory_dump(
-            args.memdump,
-            max_strings=max(args.memdump_max_strings, 1),
-            max_regions=max(args.memdump_max_regions, 1),
-        )
+        result = analyze_memory_dump(args.memdump, max_strings=max(args.memdump_max_strings, 1), max_regions=max(args.memdump_max_regions, 1))
     except (OSError, ValueError) as exc:
         console.print(f"[red]Memory dump analysis failed:[/red] {exc}")
         return 2
@@ -129,25 +120,13 @@ def run_memory_dump_mode(args) -> int:
         for item in result["strings"][:30]:
             strings.add_row(str(item["offset"]), str(item["length"]), str(item["value"]))
         console.print(strings)
-    if result.get("high_entropy_regions"):
-        entropy = Table(title="Dump High Entropy Regions")
-        entropy.add_column("Offset", style="cyan")
-        entropy.add_column("Size", style="white")
-        entropy.add_column("Entropy", style="white")
-        for item in result["high_entropy_regions"][:30]:
-            entropy.add_row(str(item["offset"]), str(item["size"]), str(item["entropy"]))
-        console.print(entropy)
     save_tool_json(result, args.tool_json)
     return 0
 
 
 def run_pcap_mode(args) -> int:
     try:
-        result = analyze_pcap(
-            args.pcap,
-            max_packets=max(args.pcap_max_packets, 1),
-            payload_preview=max(args.pcap_payload_preview, 0),
-        )
+        result = analyze_pcap(args.pcap, max_packets=max(args.pcap_max_packets, 1), payload_preview=max(args.pcap_payload_preview, 0))
     except (OSError, ValueError) as exc:
         console.print(f"[red]PCAP analysis failed:[/red] {exc}")
         return 2
@@ -173,21 +152,9 @@ def run_opcode_mode(args) -> int:
     try:
         base = parse_opcode_integer(args.opcode_base, 0) if args.opcode_base is not None else None
         if args.opcode_hex:
-            result = disassemble_hex_string(
-                hex_string=args.opcode_hex,
-                architecture=args.opcode_arch,
-                base_address=base or 0,
-                instruction_limit=max(args.opcode_limit, 1),
-            )
+            result = disassemble_hex_string(hex_string=args.opcode_hex, architecture=args.opcode_arch, base_address=base or 0, instruction_limit=max(args.opcode_limit, 1))
         else:
-            result = disassemble_file_range(
-                path=args.opcode_file,
-                offset=parse_opcode_integer(args.opcode_offset),
-                length=parse_opcode_integer(args.opcode_length, 256),
-                architecture=args.opcode_arch,
-                base_address=base,
-                instruction_limit=max(args.opcode_limit, 1),
-            )
+            result = disassemble_file_range(path=args.opcode_file, offset=parse_opcode_integer(args.opcode_offset), length=parse_opcode_integer(args.opcode_length, 256), architecture=args.opcode_arch, base_address=base, instruction_limit=max(args.opcode_limit, 1))
     except (OSError, ValueError, OpcodeViewerError) as exc:
         console.print(f"[red]Opcode viewer failed:[/red] {exc}")
         return 2
@@ -211,14 +178,9 @@ def run_transform_mode(args) -> int:
     except (TransformError, ValueError, OSError) as exc:
         console.print(f"[red]Transform failed:[/red] {exc}")
         return 2
-    if args.transform_output_file:
-        console.print(f"Transform Output : {output}")
-    else:
-        console.print(output)
+    console.print(f"Transform Output : {output}" if args.transform_output_file else output)
     return 0
 
-# keep existing analysis output helpers compact by importing from the prior generated file is not available;
-# below functions are intentionally concise wrappers for the primary analysis path.
 
 def print_diff_result(diff: dict) -> None:
     summary = Table(title="Safe Binary Diff Summary")
@@ -227,15 +189,6 @@ def print_diff_result(diff: dict) -> None:
     for key in ["original_path", "modified_path", "original_sha256", "modified_sha256", "original_size", "modified_size", "size_delta", "changed_range_count", "truncated"]:
         summary.add_row(key, str(diff.get(key, "")))
     console.print(summary)
-    ranges = Table(title="Changed Ranges")
-    ranges.add_column("Start", style="cyan")
-    ranges.add_column("End", style="cyan")
-    ranges.add_column("Length", style="white")
-    ranges.add_column("Original Preview", style="red")
-    ranges.add_column("Modified Preview", style="green")
-    for item in diff.get("changed_ranges", [])[:30]:
-        ranges.add_row(str(item.get("start_offset", "")), str(item.get("end_offset_exclusive", "")), str(item.get("length", "")), str(item.get("original_preview", "")), str(item.get("modified_preview", "")))
-    console.print(ranges)
 
 
 def print_recent(rows: list[dict]) -> None:
@@ -243,12 +196,7 @@ def print_recent(rows: list[dict]) -> None:
     for column in ["ID", "Created", "Target", "Arch", "SHA256", "Risk", "VMProtect", "APIs", "Protector", "YARA"]:
         table.add_column(column)
     for row in rows:
-        table.add_row(
-            str(row["id"]), str(row["created_at"]), str(row["target_path"]), str(row["architecture"]), str(row["sha256"]),
-            f"{row.get('risk_score', 0)} / {row.get('risk_severity', 'low')}",
-            f"{row.get('vmprotect_classification', 'unknown')} / {row.get('vmprotect_confidence', 0)}",
-            str(row["suspicious_api_count"]), str(row["protector_finding_count"]), str(row.get("yara_match_count", 0)),
-        )
+        table.add_row(str(row["id"]), str(row["created_at"]), str(row["target_path"]), str(row["architecture"]), str(row["sha256"]), f"{row.get('risk_score', 0)} / {row.get('risk_severity', 'low')}", f"{row.get('vmprotect_classification', 'unknown')} / {row.get('vmprotect_confidence', 0)}", str(row["suspicious_api_count"]), str(row["protector_finding_count"]), str(row.get("yara_match_count", 0)))
     console.print(table)
 
 
@@ -257,6 +205,7 @@ def print_summary(result) -> None:
     features = result.pe_features or {}
     tls = features.get("tls", {})
     crypto = result.crypto_analysis or {}
+    problems = result.problem_locations or {}
     summary = Table(title="PE Analysis Summary")
     summary.add_column("Field", style="cyan")
     summary.add_column("Value", style="white")
@@ -266,6 +215,7 @@ def print_summary(result) -> None:
         "SHA256": result.hashes.sha256,
         "Risk": f"{result.risk.get('score', 0)} / {result.risk.get('severity', 'low')}",
         "VMProtect": f"{vmp.get('classification', 'unknown')} / {vmp.get('confidence_score', 0)}",
+        "Problem Locations": problems.get("location_count", 0),
         "EntryPoint Section": features.get("entry_point_section", ""),
         "Section Anomalies": features.get("section_anomaly_count", 0),
         "TLS": f"present={tls.get('present', False)}, callbacks={tls.get('callback_count', 0)}",
@@ -281,20 +231,20 @@ def print_summary(result) -> None:
         summary.add_row(key, str(value))
     console.print(summary)
 
+    if problems.get("locations"):
+        table = Table(title="Top Problem Locations")
+        for column in ["Priority", "Category", "Title", "Address/Offset", "Section", "Reason", "Suggested Action"]:
+            table.add_column(column)
+        for item in problems.get("locations", [])[:15]:
+            table.add_row(str(item.get("priority", "")), str(item.get("category", "")), str(item.get("title", "")), str(item.get("address_or_offset", "")), str(item.get("section", "")), str(item.get("reason", "")), str(item.get("suggested_action", "")))
+        console.print(table)
+
     if vmp.get("evidence"):
         table = Table(title="VMProtect Evidence")
         for column in ["Points", "Severity", "Category", "Title", "Detail"]:
             table.add_column(column)
         for item in vmp.get("evidence", [])[:20]:
             table.add_row(str(item.get("points", 0)), str(item.get("severity", "")), str(item.get("category", "")), str(item.get("title", "")), str(item.get("detail", "")))
-        console.print(table)
-
-    if crypto.get("high_entropy_regions"):
-        table = Table(title="High Entropy Regions")
-        for column in ["Offset", "Size", "Entropy"]:
-            table.add_column(column)
-        for item in crypto.get("high_entropy_regions", [])[:20]:
-            table.add_row(str(item.get("offset", "")), str(item.get("size", "")), str(item.get("entropy", "")))
         console.print(table)
 
     if result.warnings:
@@ -367,7 +317,7 @@ def main() -> int:
 
     console.print("[bold cyan]AIA Reverse Lab[/bold cyan]")
     print_summary(result)
-    console.print("[green]Step 9.9 viewer tools completed.[/green]")
+    console.print("[green]Step 9.10 problem locator completed.[/green]")
     console.print(f"Analysis ID : {analysis_id}")
     console.print(f"Database    : {Path(args.db)}")
     console.print(f"JSON Report : {report_paths['json']}")
