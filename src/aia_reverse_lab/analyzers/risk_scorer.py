@@ -13,6 +13,7 @@ def score_analysis(
     overlay_size: int,
     strings: list[dict[str, Any]],
     disassembly: list[dict[str, Any]],
+    vmprotect_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Score static analysis indicators into a defensive triage risk summary.
 
@@ -25,52 +26,20 @@ def score_analysis(
     if high_entropy_sections:
         points = min(20, 8 + len(high_entropy_sections) * 4)
         score += points
-        findings.append(
-            build_finding(
-                points=points,
-                severity="medium",
-                category="packing",
-                title="High entropy section(s)",
-                detail=", ".join(section.name for section in high_entropy_sections[:10]),
-            )
-        )
+        findings.append(build_finding(points, "medium", "packing", "High entropy section(s)", ", ".join(section.name for section in high_entropy_sections[:10])))
 
     import_count = sum(len(item.functions) for item in imports)
     if import_count == 0:
         score += 15
-        findings.append(
-            build_finding(
-                points=15,
-                severity="medium",
-                category="imports",
-                title="No imports detected",
-                detail="Missing imports may indicate packing, manual loading, or malformed metadata.",
-            )
-        )
+        findings.append(build_finding(15, "medium", "imports", "No imports detected", "Missing imports may indicate packing, manual loading, or malformed metadata."))
     elif import_count <= 5:
         score += 8
-        findings.append(
-            build_finding(
-                points=8,
-                severity="low",
-                category="imports",
-                title="Sparse import table",
-                detail=f"Only {import_count} imported function(s) detected.",
-            )
-        )
+        findings.append(build_finding(8, "low", "imports", "Sparse import table", f"Only {import_count} imported function(s) detected."))
 
     if overlay_size > 0:
         points = 6 if overlay_size < 1024 * 64 else 12
         score += points
-        findings.append(
-            build_finding(
-                points=points,
-                severity="low" if points == 6 else "medium",
-                category="overlay",
-                title="Overlay data detected",
-                detail=f"Overlay size: {overlay_size:,} bytes.",
-            )
-        )
+        findings.append(build_finding(points, "low" if points == 6 else "medium", "overlay", "Overlay data detected", f"Overlay size: {overlay_size:,} bytes."))
 
     for item in suspicious_apis:
         severity = item.get("severity", "low")
@@ -79,68 +48,44 @@ def score_analysis(
         if category == "process_injection":
             points += 5
         score += points
-        findings.append(
-            build_finding(
-                points=points,
-                severity=severity,
-                category=f"api:{category}",
-                title=f"Suspicious API: {item.get('function', '')}",
-                detail=f"{item.get('dll', '')}!{item.get('function', '')}",
-            )
-        )
+        findings.append(build_finding(points, severity, f"api:{category}", f"Suspicious API: {item.get('function', '')}", f"{item.get('dll', '')}!{item.get('function', '')}"))
 
     for finding in protector_findings:
         confidence = str(finding.get("confidence", "low"))
         points = {"high": 20, "medium": 12, "low": 6}.get(confidence, 6)
         score += points
-        findings.append(
-            build_finding(
-                points=points,
-                severity="high" if confidence == "high" else "medium" if confidence == "medium" else "low",
-                category="protector",
-                title=f"Protector indicator: {finding.get('name', 'unknown')}",
-                detail=str(finding.get("reason", "")),
-            )
-        )
+        findings.append(build_finding(points, "high" if confidence == "high" else "medium" if confidence == "medium" else "low", "protector", f"Protector indicator: {finding.get('name', 'unknown')}", str(finding.get("reason", ""))))
+
+    if vmprotect_profile:
+        vmp_classification = str(vmprotect_profile.get("classification", ""))
+        vmp_score = int(vmprotect_profile.get("confidence_score", 0) or 0)
+        if vmp_classification == "vmprotect_likely":
+            points = min(30, 15 + vmp_score // 5)
+            score += points
+            findings.append(build_finding(points, "high", "vmprotect", "VMProtect likely", f"VMProtect profile confidence score is {vmp_score}."))
+        elif vmp_classification == "vmprotect_possible":
+            points = min(18, 8 + vmp_score // 8)
+            score += points
+            findings.append(build_finding(points, "medium", "vmprotect", "VMProtect possible", f"VMProtect profile confidence score is {vmp_score}."))
+        elif vmp_classification == "protected_or_packed_likely":
+            points = min(15, 6 + vmp_score // 10)
+            score += points
+            findings.append(build_finding(points, "medium", "vmprotect", "Protected or packed likely", f"Protection profile confidence score is {vmp_score}."))
 
     if yara_matches:
         points = min(40, 20 + len(yara_matches) * 5)
         score += points
-        findings.append(
-            build_finding(
-                points=points,
-                severity="high",
-                category="yara",
-                title="YARA rule match",
-                detail=f"Matched {len(yara_matches)} rule(s).",
-            )
-        )
+        findings.append(build_finding(points, "high", "yara", "YARA rule match", f"Matched {len(yara_matches)} rule(s)."))
 
     tagged_string_count = sum(1 for item in strings if item.get("tags"))
     if tagged_string_count:
         points = min(15, tagged_string_count)
         score += points
-        findings.append(
-            build_finding(
-                points=points,
-                severity="low" if points < 10 else "medium",
-                category="strings",
-                title="Tagged suspicious strings",
-                detail=f"{tagged_string_count} extracted string(s) matched triage keywords.",
-            )
-        )
+        findings.append(build_finding(points, "low" if points < 10 else "medium", "strings", "Tagged suspicious strings", f"{tagged_string_count} extracted string(s) matched triage keywords."))
 
     if has_dense_control_flow_markers(disassembly):
         score += 8
-        findings.append(
-            build_finding(
-                points=8,
-                severity="low",
-                category="disassembly",
-                title="EntryPoint branch density indicator",
-                detail="EntryPoint window contains multiple branch/call instructions.",
-            )
-        )
+        findings.append(build_finding(8, "low", "disassembly", "EntryPoint branch density indicator", "EntryPoint window contains multiple branch/call instructions."))
 
     normalized_score = min(score, 100)
     severity = severity_from_score(normalized_score)
@@ -188,11 +133,7 @@ def collapse_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     collapsed: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()
     for finding in sorted(findings, key=lambda item: item.get("points", 0), reverse=True):
-        key = (
-            str(finding.get("severity", "")),
-            str(finding.get("category", "")),
-            str(finding.get("title", "")),
-        )
+        key = (str(finding.get("severity", "")), str(finding.get("category", "")), str(finding.get("title", "")))
         if key in seen:
             continue
         seen.add(key)
