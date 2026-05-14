@@ -18,10 +18,7 @@ console = Console()
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="aia-reverse-lab",
-        description="Defensive EXE/DLL binary analysis workbench",
-    )
+    parser = argparse.ArgumentParser(prog="aia-reverse-lab", description="Defensive EXE/DLL binary analysis workbench")
     parser.add_argument("target", nargs="?", help="Path to EXE/DLL file to analyze")
     parser.add_argument("--out", default="reports", help="Output directory for analysis reports. Default: reports")
     parser.add_argument("--db", default="aia_reverse_lab.sqlite3", help="SQLite database path. Default: aia_reverse_lab.sqlite3")
@@ -71,15 +68,23 @@ def print_recent(rows: list[dict]) -> None:
     table.add_column("Arch", style="green")
     table.add_column("SHA256", style="magenta")
     table.add_column("Risk", style="red")
-    table.add_column("Suspicious APIs", style="red")
+    table.add_column("VMProtect", style="yellow")
+    table.add_column("APIs", style="red")
     table.add_column("Protector", style="yellow")
     table.add_column("YARA", style="magenta")
 
     for row in rows:
         table.add_row(
-            str(row["id"]), str(row["created_at"]), str(row["target_path"]), str(row["architecture"]), str(row["sha256"]),
-            f"{row.get('risk_score', 0)} / {row.get('risk_severity', 'low')}", str(row["suspicious_api_count"]),
-            str(row["protector_finding_count"]), str(row.get("yara_match_count", 0)),
+            str(row["id"]),
+            str(row["created_at"]),
+            str(row["target_path"]),
+            str(row["architecture"]),
+            str(row["sha256"]),
+            f"{row.get('risk_score', 0)} / {row.get('risk_severity', 'low')}",
+            f"{row.get('vmprotect_classification', 'unknown')} / {row.get('vmprotect_confidence', 0)}",
+            str(row["suspicious_api_count"]),
+            str(row["protector_finding_count"]),
+            str(row.get("yara_match_count", 0)),
         )
     console.print(table)
 
@@ -89,7 +94,6 @@ def print_summary(result) -> None:
     summary = Table(title="PE Analysis Summary")
     summary.add_column("Field", style="cyan", no_wrap=True)
     summary.add_column("Value", style="white")
-
     summary.add_row("Path", result.path)
     summary.add_row("Size", f"{result.size:,} bytes")
     summary.add_row("SHA256", result.hashes.sha256)
