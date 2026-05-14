@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aia-reverse-lab"
+version = "0.1.0"
+description = "Defensive EXE/DLL binary analysis workbench"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "AIA Reverse Lab" }
+]
+dependencies = [
+  "pefile>=2023.2.7",
+  "jinja2>=3.1.0",
+  "rich>=13.7.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "ruff>=0.4.0"
+]
+
+[project.scripts]
+aia-reverse-lab = "aia_reverse_lab.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
