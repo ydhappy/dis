@@ -28,6 +28,7 @@ HTML_TEMPLATE = """<!doctype html>
     .muted { color: #6b7280; }
     .warning { color: #b45309; }
     .safe-note { border-left: 4px solid #2563eb; padding-left: 12px; }
+    .mono { font-family: Consolas, 'Courier New', monospace; font-size: 13px; }
   </style>
 </head>
 <body>
@@ -55,6 +56,7 @@ HTML_TEMPLATE = """<!doctype html>
       <tr><th>Compile Timestamp</th><td>{{ result.compile_timestamp }}</td></tr>
       <tr><th>Overlay Size</th><td>{{ "{:,}".format(result.overlay_size) }} bytes</td></tr>
       <tr><th>YARA Matches</th><td>{{ result.yara_matches | length }}</td></tr>
+      <tr><th>Disassembly</th><td>{{ result.disassembly | length }} instruction(s)</td></tr>
     </table>
   </div>
 
@@ -83,6 +85,25 @@ HTML_TEMPLATE = """<!doctype html>
       </tr>
       {% endfor %}
     </table>
+  </div>
+
+  <div class="card">
+    <h2>EntryPoint Disassembly</h2>
+    {% if result.disassembly %}
+    <table class="mono">
+      <tr><th>Address</th><th>Bytes</th><th>Mnemonic</th><th>Operands</th></tr>
+      {% for ins in result.disassembly %}
+      <tr>
+        <td><code>{{ ins.address }}</code></td>
+        <td><code>{{ ins.bytes }}</code></td>
+        <td><code>{{ ins.mnemonic }}</code></td>
+        <td><code>{{ ins.op_str }}</code></td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted">No disassembly was requested or Capstone is not available.</p>
+    {% endif %}
   </div>
 
   <div class="card">
