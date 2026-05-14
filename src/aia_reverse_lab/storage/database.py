@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS metadata (
@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS analyses (
     overlay_size INTEGER NOT NULL,
     suspicious_api_count INTEGER NOT NULL,
     protector_finding_count INTEGER NOT NULL,
+    yara_match_count INTEGER NOT NULL DEFAULT 0,
     json_report_path TEXT NOT NULL,
     html_report_path TEXT NOT NULL,
     full_result_json TEXT NOT NULL
@@ -53,6 +54,7 @@ class AnalysisDatabase:
     def initialize(self) -> None:
         with self._connect() as connection:
             connection.executescript(SCHEMA_SQL)
+            self._migrate(connection)
             connection.execute(
                 "INSERT OR REPLACE INTO metadata(key, value) VALUES(?, ?)",
                 ("schema_version", str(SCHEMA_VERSION)),
@@ -84,10 +86,11 @@ class AnalysisDatabase:
                     overlay_size,
                     suspicious_api_count,
                     protector_finding_count,
+                    yara_match_count,
                     json_report_path,
                     html_report_path,
                     full_result_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     datetime.now(timezone.utc).isoformat(),
@@ -108,6 +111,7 @@ class AnalysisDatabase:
                     result.overlay_size,
                     len(result.suspicious_apis),
                     len(result.protector_findings),
+                    len(result.yara_matches),
                     str(report_paths["json"]),
                     str(report_paths["html"]),
                     json.dumps(result_dict, ensure_ascii=False),
@@ -131,6 +135,7 @@ class AnalysisDatabase:
                     import_count,
                     suspicious_api_count,
                     protector_finding_count,
+                    yara_match_count,
                     json_report_path,
                     html_report_path
                 FROM analyses
@@ -140,6 +145,15 @@ class AnalysisDatabase:
                 (limit,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def _migrate(self, connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(analyses)").fetchall()
+        }
+        if "yara_match_count" not in columns:
+            connection.execute(
+                "ALTER TABLE analyses ADD COLUMN yara_match_count INTEGER NOT NULL DEFAULT 0"
+            )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
