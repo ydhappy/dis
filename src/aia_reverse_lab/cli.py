@@ -9,6 +9,7 @@ from rich.table import Table
 
 from aia_reverse_lab import __version__
 from aia_reverse_lab.analyzers.pe_analyzer import PEAnalyzer
+from aia_reverse_lab.reporting.report_generator import write_reports
 
 console = Console()
 
@@ -113,17 +114,19 @@ def main() -> int:
 
     try:
         result = PEAnalyzer().analyze(target)
+        report_paths = write_reports(result, output_dir)
     except pefile.PEFormatError as exc:
         console.print(f"[red]Invalid or unsupported PE file:[/red] {exc}")
         return 3
     except OSError as exc:
-        console.print(f"[red]Failed to read target file:[/red] {exc}")
+        console.print(f"[red]Failed to read or write file:[/red] {exc}")
         return 4
 
     console.print("[bold cyan]AIA Reverse Lab[/bold cyan]")
     print_summary(result)
-    console.print("[green]Step 4 static enrichment completed.[/green]")
-    console.print("[yellow]JSON/HTML report output will be added in Step 5.[/yellow]")
+    console.print("[green]Step 5 report generation completed.[/green]")
+    console.print(f"JSON Report : {report_paths['json']}")
+    console.print(f"HTML Report : {report_paths['html']}")
     return 0
 
 
