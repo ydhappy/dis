@@ -1,0 +1,200 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from jinja2 import Template
+
+
+HTML_TEMPLATE = """<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AIA Reverse Lab Report - {{ result.hashes.sha256 }}</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #1f2937; background: #f9fafb; }
+    h1, h2 { color: #111827; }
+    .card { background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; margin: 16px 0; }
+    table { border-collapse: collapse; width: 100%; background: white; }
+    th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; vertical-align: top; }
+    th { background: #f3f4f6; }
+    code { background: #f3f4f6; padding: 2px 4px; border-radius: 4px; }
+    .severity-high { color: #b91c1c; font-weight: bold; }
+    .severity-medium { color: #b45309; font-weight: bold; }
+    .severity-low { color: #047857; font-weight: bold; }
+    .muted { color: #6b7280; }
+    .warning { color: #b45309; }
+    .safe-note { border-left: 4px solid #2563eb; padding-left: 12px; }
+  </style>
+</head>
+<body>
+  <h1>AIA Reverse Lab 분석 리포트</h1>
+  <p class="muted">Generated at {{ generated_at }}</p>
+
+  <div class="card safe-note">
+    <strong>Research / Defensive Analysis Notice</strong>
+    <p>이 리포트는 허가된 파일, 자체 제작 샘플, 악성코드 방어 분석, CTF/연구용 바이너리 분석을 위한 정적 분석 결과입니다.</p>
+  </div>
+
+  <div class="card">
+    <h2>요약</h2>
+    <table>
+      <tr><th>Path</th><td><code>{{ result.path }}</code></td></tr>
+      <tr><th>Size</th><td>{{ "{:,}".format(result.size) }} bytes</td></tr>
+      <tr><th>MD5</th><td><code>{{ result.hashes.md5 }}</code></td></tr>
+      <tr><th>SHA1</th><td><code>{{ result.hashes.sha1 }}</code></td></tr>
+      <tr><th>SHA256</th><td><code>{{ result.hashes.sha256 }}</code></td></tr>
+      <tr><th>Architecture</th><td>{{ result.architecture }}</td></tr>
+      <tr><th>Machine</th><td>{{ result.machine }}</td></tr>
+      <tr><th>Subsystem</th><td>{{ result.subsystem }}</td></tr>
+      <tr><th>Image Base</th><td><code>{{ result.image_base }}</code></td></tr>
+      <tr><th>Entry Point</th><td><code>{{ result.entry_point }}</code></td></tr>
+      <tr><th>Compile Timestamp</th><td>{{ result.compile_timestamp }}</td></tr>
+      <tr><th>Overlay Size</th><td>{{ "{:,}".format(result.overlay_size) }} bytes</td></tr>
+    </table>
+  </div>
+
+  {% if result.warnings %}
+  <div class="card">
+    <h2>Warnings</h2>
+    <ul>
+      {% for warning in result.warnings %}<li class="warning">{{ warning }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2>Sections</h2>
+    <table>
+      <tr><th>Name</th><th>VA</th><th>Virtual Size</th><th>Raw Size</th><th>Raw Pointer</th><th>Characteristics</th><th>Entropy</th></tr>
+      {% for section in result.sections %}
+      <tr>
+        <td><code>{{ section.name }}</code></td>
+        <td><code>{{ section.virtual_address }}</code></td>
+        <td>{{ section.virtual_size }}</td>
+        <td>{{ section.raw_size }}</td>
+        <td><code>{{ section.raw_pointer }}</code></td>
+        <td><code>{{ section.characteristics }}</code></td>
+        <td>{{ section.entropy }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Protector / Packer Indicators</h2>
+    {% if result.protector_findings %}
+    <table>
+      <tr><th>Name</th><th>Confidence</th><th>Reason</th></tr>
+      {% for finding in result.protector_findings %}
+      <tr><td>{{ finding.name }}</td><td>{{ finding.confidence }}</td><td>{{ finding.reason }}</td></tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted">No packer/protector indicators detected by current heuristics.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Suspicious API Indicators</h2>
+    {% if result.suspicious_apis %}
+    <table>
+      <tr><th>Severity</th><th>Category</th><th>DLL</th><th>Function</th></tr>
+      {% for api in result.suspicious_apis %}
+      <tr>
+        <td class="severity-{{ api.severity }}">{{ api.severity }}</td>
+        <td>{{ api.category }}</td>
+        <td>{{ api.dll }}</td>
+        <td><code>{{ api.function }}</code></td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted">No suspicious API indicators detected by current rules.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Imports</h2>
+    {% if result.imports %}
+    <table>
+      <tr><th>DLL</th><th>Functions</th></tr>
+      {% for item in result.imports %}
+      <tr><td><code>{{ item.dll }}</code></td><td>{{ item.functions | join(', ') }}</td></tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted">No imports found.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Exports</h2>
+    {% if result.exports %}
+    <table>
+      <tr><th>Name</th><th>Ordinal</th><th>Address</th></tr>
+      {% for item in result.exports %}
+      <tr><td><code>{{ item.name }}</code></td><td>{{ item.ordinal }}</td><td><code>{{ item.address }}</code></td></tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted">No exports found.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Strings, first 200</h2>
+    {% if result.strings %}
+    <table>
+      <tr><th>Type</th><th>Offset</th><th>Tags</th><th>Value</th></tr>
+      {% for item in result.strings[:200] %}
+      <tr>
+        <td>{{ item.type }}</td>
+        <td><code>{{ item.offset }}</code></td>
+        <td>{{ item.tags | join(', ') }}</td>
+        <td><code>{{ item.value }}</code></td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted">No strings extracted.</p>
+    {% endif %}
+  </div>
+</body>
+</html>
+"""
+
+
+def write_reports(result, output_dir: str | Path) -> dict[str, Path]:
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+
+    stem = result.hashes.sha256
+    json_path = output / f"{stem}.json"
+    html_path = output / f"{stem}.html"
+
+    write_json_report(result.to_dict(), json_path)
+    write_html_report(result, html_path)
+
+    return {"json": json_path, "html": html_path}
+
+
+def write_json_report(data: dict[str, Any], path: Path) -> None:
+    payload = {
+        "schema": "aia_reverse_lab.report.v1",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "analysis": data,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def write_html_report(result, path: Path) -> None:
+    template = Template(HTML_TEMPLATE, autoescape=True)
+    html = template.render(
+        result=result,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    path.write_text(html, encoding="utf-8")
