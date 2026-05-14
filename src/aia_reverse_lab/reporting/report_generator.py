@@ -26,6 +26,7 @@ HTML_TEMPLATE = """<!doctype html>
     .severity-high { color: #b91c1c; font-weight: bold; }
     .severity-medium { color: #b45309; font-weight: bold; }
     .severity-low { color: #047857; font-weight: bold; }
+    .severity-info { color: #2563eb; font-weight: bold; }
     .muted { color: #6b7280; }
     .warning { color: #b45309; }
     .safe-note { border-left: 4px solid #2563eb; padding-left: 12px; }
@@ -50,6 +51,7 @@ HTML_TEMPLATE = """<!doctype html>
       <tr><th>SHA1</th><td><code>{{ result.hashes.sha1 }}</code></td></tr>
       <tr><th>SHA256</th><td><code>{{ result.hashes.sha256 }}</code></td></tr>
       <tr><th>Risk</th><td class="severity-{{ result.risk.severity | default('low') }}">{{ result.risk.score | default(0) }} / {{ result.risk.severity | default('low') }}</td></tr>
+      <tr><th>VMProtect</th><td>{{ result.vmprotect_profile.classification | default('unknown') }} / {{ result.vmprotect_profile.confidence_score | default(0) }}</td></tr>
       <tr><th>Architecture</th><td>{{ result.architecture }}</td></tr>
       <tr><th>Machine</th><td>{{ result.machine }}</td></tr>
       <tr><th>Subsystem</th><td>{{ result.subsystem }}</td></tr>
@@ -60,6 +62,41 @@ HTML_TEMPLATE = """<!doctype html>
       <tr><th>YARA Matches</th><td>{{ result.yara_matches | length }}</td></tr>
       <tr><th>Disassembly</th><td>{{ result.disassembly | length }} instruction(s)</td></tr>
     </table>
+  </div>
+
+  <div class="card">
+    <h2>VMProtect Profile</h2>
+    {% if result.vmprotect_profile %}
+    <table>
+      <tr><th>Classification</th><td>{{ result.vmprotect_profile.classification }}</td></tr>
+      <tr><th>Confidence</th><td>{{ result.vmprotect_profile.confidence_score }}</td></tr>
+      <tr><th>Evidence Count</th><td>{{ result.vmprotect_profile.evidence_count }}</td></tr>
+      <tr><th>Analyst Notes</th><td>{{ result.vmprotect_profile.analyst_notes }}</td></tr>
+    </table>
+    {% if result.vmprotect_profile.evidence %}
+    <h3>Evidence</h3>
+    <table>
+      <tr><th>Points</th><th>Severity</th><th>Category</th><th>Title</th><th>Detail</th></tr>
+      {% for item in result.vmprotect_profile.evidence %}
+      <tr>
+        <td>{{ item.points }}</td>
+        <td class="severity-{{ item.severity }}">{{ item.severity }}</td>
+        <td>{{ item.category }}</td>
+        <td>{{ item.title }}</td>
+        <td>{{ item.detail }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+    {% if result.vmprotect_profile.safe_next_steps %}
+    <h3>Safe Next Steps</h3>
+    <ul>
+      {% for item in result.vmprotect_profile.safe_next_steps %}<li>{{ item }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% else %}
+    <p class="muted">No VMProtect profile was generated.</p>
+    {% endif %}
   </div>
 
   <div class="card">
