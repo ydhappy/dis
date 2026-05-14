@@ -23,51 +23,17 @@ def build_parser() -> argparse.ArgumentParser:
         description="Defensive EXE/DLL binary analysis workbench",
     )
     parser.add_argument("target", nargs="?", help="Path to EXE/DLL file to analyze")
-    parser.add_argument(
-        "--out",
-        default="reports",
-        help="Output directory for analysis reports. Default: reports",
-    )
-    parser.add_argument(
-        "--db",
-        default="aia_reverse_lab.sqlite3",
-        help="SQLite database path. Default: aia_reverse_lab.sqlite3",
-    )
-    parser.add_argument(
-        "--yara-rules",
-        default=None,
-        help="Optional YARA rule file or directory to scan with.",
-    )
-    parser.add_argument(
-        "--disasm",
-        action="store_true",
-        help="Enable passive static EntryPoint disassembly using optional Capstone.",
-    )
-    parser.add_argument(
-        "--disasm-limit",
-        type=int,
-        default=80,
-        help="Maximum number of EntryPoint instructions to disassemble. Default: 80",
-    )
+    parser.add_argument("--out", default="reports", help="Output directory for analysis reports. Default: reports")
+    parser.add_argument("--db", default="aia_reverse_lab.sqlite3", help="SQLite database path. Default: aia_reverse_lab.sqlite3")
+    parser.add_argument("--yara-rules", default=None, help="Optional YARA rule file or directory to scan with.")
+    parser.add_argument("--disasm", action="store_true", help="Enable passive static EntryPoint disassembly using optional Capstone.")
+    parser.add_argument("--disasm-limit", type=int, default=80, help="Maximum number of EntryPoint instructions to disassemble. Default: 80")
     parser.add_argument("--diff-original", default=None, help="Original authorized file for safe binary diff mode.")
     parser.add_argument("--diff-modified", default=None, help="Modified authorized file for safe binary diff mode.")
     parser.add_argument("--diff-max-ranges", type=int, default=200, help="Maximum changed ranges to report. Default: 200")
-    parser.add_argument(
-        "--recent",
-        action="store_true",
-        help="Show recent analyses from the SQLite database and exit.",
-    )
-    parser.add_argument(
-        "--recent-limit",
-        type=int,
-        default=20,
-        help="Number of recent analyses to show with --recent. Default: 20",
-    )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"aia-reverse-lab {__version__}",
-    )
+    parser.add_argument("--recent", action="store_true", help="Show recent analyses from the SQLite database and exit.")
+    parser.add_argument("--recent-limit", type=int, default=20, help="Number of recent analyses to show with --recent. Default: 20")
+    parser.add_argument("--version", action="version", version=f"aia-reverse-lab {__version__}")
     return parser
 
 
@@ -93,13 +59,7 @@ def print_diff_result(diff: dict) -> None:
     ranges.add_column("Original Preview", style="red")
     ranges.add_column("Modified Preview", style="green")
     for item in diff["changed_ranges"][:30]:
-        ranges.add_row(
-            str(item["start_offset"]),
-            str(item["end_offset_exclusive"]),
-            str(item["length"]),
-            str(item["original_preview"]),
-            str(item["modified_preview"]),
-        )
+        ranges.add_row(str(item["start_offset"]), str(item["end_offset_exclusive"]), str(item["length"]), str(item["original_preview"]), str(item["modified_preview"]))
     console.print(ranges)
 
 
@@ -117,20 +77,15 @@ def print_recent(rows: list[dict]) -> None:
 
     for row in rows:
         table.add_row(
-            str(row["id"]),
-            str(row["created_at"]),
-            str(row["target_path"]),
-            str(row["architecture"]),
-            str(row["sha256"]),
-            f"{row.get('risk_score', 0)} / {row.get('risk_severity', 'low')}",
-            str(row["suspicious_api_count"]),
-            str(row["protector_finding_count"]),
-            str(row.get("yara_match_count", 0)),
+            str(row["id"]), str(row["created_at"]), str(row["target_path"]), str(row["architecture"]), str(row["sha256"]),
+            f"{row.get('risk_score', 0)} / {row.get('risk_severity', 'low')}", str(row["suspicious_api_count"]),
+            str(row["protector_finding_count"]), str(row.get("yara_match_count", 0)),
         )
     console.print(table)
 
 
 def print_summary(result) -> None:
+    vmp = result.vmprotect_profile or {}
     summary = Table(title="PE Analysis Summary")
     summary.add_column("Field", style="cyan", no_wrap=True)
     summary.add_column("Value", style="white")
@@ -139,6 +94,7 @@ def print_summary(result) -> None:
     summary.add_row("Size", f"{result.size:,} bytes")
     summary.add_row("SHA256", result.hashes.sha256)
     summary.add_row("Risk", f"{result.risk.get('score', 0)} / {result.risk.get('severity', 'low')}")
+    summary.add_row("VMProtect", f"{vmp.get('classification', 'unknown')} / {vmp.get('confidence_score', 0)}")
     summary.add_row("Architecture", result.architecture)
     summary.add_row("Machine", result.machine)
     summary.add_row("Subsystem", result.subsystem)
@@ -157,8 +113,20 @@ def print_summary(result) -> None:
     summary.add_row("Disassembly", f"{len(result.disassembly)} instruction(s)")
     summary.add_row("Flow Blocks", str(result.flow_summary.get("basic_block_count", 0)))
     summary.add_row("Data Coverage", f"{result.data_requirements.get('coverage_percent', 0)}%")
-
     console.print(summary)
+
+    if vmp.get("evidence"):
+        vmp_table = Table(title="VMProtect Profile Evidence")
+        vmp_table.add_column("Points", style="red")
+        vmp_table.add_column("Severity", style="yellow")
+        vmp_table.add_column("Category", style="cyan")
+        vmp_table.add_column("Title", style="white")
+        vmp_table.add_column("Detail", style="white")
+        for item in vmp.get("evidence", [])[:15]:
+            vmp_table.add_row(str(item.get("points", 0)), str(item.get("severity", "")), str(item.get("category", "")), str(item.get("title", "")), str(item.get("detail", "")))
+        console.print(vmp_table)
+        if vmp.get("analyst_notes"):
+            console.print(f"[cyan]VMProtect Note:[/cyan] {vmp.get('analyst_notes')}")
 
     risk_findings = result.risk.get("findings", [])
     if risk_findings:
@@ -218,7 +186,6 @@ def main() -> int:
         return 0
 
     db = AnalysisDatabase(args.db)
-
     if args.recent:
         rows = db.list_recent(limit=max(args.recent_limit, 1))
         print_recent(rows)
@@ -230,17 +197,14 @@ def main() -> int:
 
     target = Path(args.target)
     output_dir = Path(args.out)
-
     if not target.exists():
         console.print(f"[red]Target file does not exist:[/red] {target}")
         return 2
-
     if not target.is_file():
         console.print(f"[red]Target is not a file:[/red] {target}")
         return 2
 
     output_dir.mkdir(parents=True, exist_ok=True)
-
     try:
         result = PEAnalyzer().analyze(target, yara_rules=args.yara_rules, disassemble=args.disasm, disasm_limit=args.disasm_limit)
         report_paths = write_reports(result, output_dir)
@@ -254,7 +218,7 @@ def main() -> int:
 
     console.print("[bold cyan]AIA Reverse Lab[/bold cyan]")
     print_summary(result)
-    console.print("[green]Step 9.5 safe flow/diff/data analysis completed.[/green]")
+    console.print("[green]Step 9.6 VMProtect profile analysis completed.[/green]")
     console.print(f"Analysis ID : {analysis_id}")
     console.print(f"Database    : {Path(args.db)}")
     console.print(f"JSON Report : {report_paths['json']}")
