@@ -68,6 +68,7 @@ class PEAnalysisResult:
     strings: list[dict[str, Any]] = field(default_factory=list)
     suspicious_apis: list[dict[str, str]] = field(default_factory=list)
     protector_findings: list[dict[str, Any]] = field(default_factory=list)
+    vmprotect_profile: dict[str, Any] = field(default_factory=dict)
     yara_matches: list[dict[str, Any]] = field(default_factory=list)
     disassembly: list[dict[str, Any]] = field(default_factory=list)
     flow_summary: dict[str, Any] = field(default_factory=dict)
@@ -97,6 +98,7 @@ class PEAnalysisResult:
             "strings": list(self.strings),
             "suspicious_apis": list(self.suspicious_apis),
             "protector_findings": list(self.protector_findings),
+            "vmprotect_profile": dict(self.vmprotect_profile),
             "yara_matches": list(self.yara_matches),
             "disassembly": list(self.disassembly),
             "flow_summary": dict(self.flow_summary),
