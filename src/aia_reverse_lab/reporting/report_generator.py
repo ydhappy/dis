@@ -54,6 +54,7 @@ HTML_TEMPLATE = """<!doctype html>
       <tr><th>Entry Point</th><td><code>{{ result.entry_point }}</code></td></tr>
       <tr><th>Compile Timestamp</th><td>{{ result.compile_timestamp }}</td></tr>
       <tr><th>Overlay Size</th><td>{{ "{:,}".format(result.overlay_size) }} bytes</td></tr>
+      <tr><th>YARA Matches</th><td>{{ result.yara_matches | length }}</td></tr>
     </table>
   </div>
 
@@ -95,6 +96,26 @@ HTML_TEMPLATE = """<!doctype html>
     </table>
     {% else %}
     <p class="muted">No packer/protector indicators detected by current heuristics.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>YARA Matches</h2>
+    {% if result.yara_matches %}
+    <table>
+      <tr><th>Rule</th><th>Namespace</th><th>Tags</th><th>String Matches</th><th>Meta</th></tr>
+      {% for match in result.yara_matches %}
+      <tr>
+        <td><code>{{ match.rule }}</code></td>
+        <td>{{ match.namespace }}</td>
+        <td>{{ match.tags | join(', ') }}</td>
+        <td>{{ match.string_match_count }}</td>
+        <td><code>{{ match.meta }}</code></td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted">No YARA matches, or no YARA rules were provided.</p>
     {% endif %}
   </div>
 
