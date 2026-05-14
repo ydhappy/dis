@@ -73,6 +73,7 @@ def print_recent(rows: list[dict]) -> None:
     table.add_column("Target", style="white")
     table.add_column("Arch", style="green")
     table.add_column("SHA256", style="magenta")
+    table.add_column("Risk", style="red")
     table.add_column("Suspicious APIs", style="red")
     table.add_column("Protector", style="yellow")
     table.add_column("YARA", style="magenta")
@@ -84,6 +85,7 @@ def print_recent(rows: list[dict]) -> None:
             str(row["target_path"]),
             str(row["architecture"]),
             str(row["sha256"]),
+            f"{row.get('risk_score', 0)} / {row.get('risk_severity', 'low')}",
             str(row["suspicious_api_count"]),
             str(row["protector_finding_count"]),
             str(row.get("yara_match_count", 0)),
@@ -99,6 +101,7 @@ def print_summary(result) -> None:
     summary.add_row("Path", result.path)
     summary.add_row("Size", f"{result.size:,} bytes")
     summary.add_row("SHA256", result.hashes.sha256)
+    summary.add_row("Risk", f"{result.risk.get('score', 0)} / {result.risk.get('severity', 'low')}")
     summary.add_row("Architecture", result.architecture)
     summary.add_row("Machine", result.machine)
     summary.add_row("Subsystem", result.subsystem)
@@ -116,6 +119,24 @@ def print_summary(result) -> None:
     summary.add_row("Disassembly", f"{len(result.disassembly)} instruction(s)")
 
     console.print(summary)
+
+    risk_findings = result.risk.get("findings", [])
+    if risk_findings:
+        risk_table = Table(title="Risk Findings")
+        risk_table.add_column("Points", style="red")
+        risk_table.add_column("Severity", style="yellow")
+        risk_table.add_column("Category", style="cyan")
+        risk_table.add_column("Title", style="white")
+        risk_table.add_column("Detail", style="white")
+        for item in risk_findings[:15]:
+            risk_table.add_row(
+                str(item.get("points", 0)),
+                str(item.get("severity", "")),
+                str(item.get("category", "")),
+                str(item.get("title", "")),
+                str(item.get("detail", "")),
+            )
+        console.print(risk_table)
 
     if result.protector_findings:
         protector_table = Table(title="Protector / Packer Indicators")
@@ -225,7 +246,7 @@ def main() -> int:
 
     console.print("[bold cyan]AIA Reverse Lab[/bold cyan]")
     print_summary(result)
-    console.print("[green]Step 8 EntryPoint disassembly completed.[/green]")
+    console.print("[green]Step 9 risk scoring completed.[/green]")
     console.print(f"Analysis ID : {analysis_id}")
     console.print(f"Database    : {Path(args.db)}")
     console.print(f"JSON Report : {report_paths['json']}")
