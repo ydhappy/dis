@@ -68,6 +68,7 @@ class PEAnalysisResult:
     strings: list[dict[str, Any]] = field(default_factory=list)
     suspicious_apis: list[dict[str, str]] = field(default_factory=list)
     protector_findings: list[dict[str, Any]] = field(default_factory=list)
+    yara_matches: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -91,5 +92,6 @@ class PEAnalysisResult:
             "strings": list(self.strings),
             "suspicious_apis": list(self.suspicious_apis),
             "protector_findings": list(self.protector_findings),
+            "yara_matches": list(self.yara_matches),
             "warnings": list(self.warnings),
         }
