@@ -61,9 +61,13 @@ class PEAnalysisResult:
     section_count: int
     import_count: int
     export_count: int
+    overlay_size: int = 0
     sections: list[SectionInfo] = field(default_factory=list)
     imports: list[ImportInfo] = field(default_factory=list)
     exports: list[ExportInfo] = field(default_factory=list)
+    strings: list[dict[str, Any]] = field(default_factory=list)
+    suspicious_apis: list[dict[str, str]] = field(default_factory=list)
+    protector_findings: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -80,8 +84,12 @@ class PEAnalysisResult:
             "section_count": self.section_count,
             "import_count": self.import_count,
             "export_count": self.export_count,
+            "overlay_size": self.overlay_size,
             "sections": [section.to_dict() for section in self.sections],
             "imports": [item.to_dict() for item in self.imports],
             "exports": [item.to_dict() for item in self.exports],
+            "strings": list(self.strings),
+            "suspicious_apis": list(self.suspicious_apis),
+            "protector_findings": list(self.protector_findings),
             "warnings": list(self.warnings),
         }
