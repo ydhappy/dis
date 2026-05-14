@@ -19,6 +19,7 @@ from aia_reverse_lab.tools.dump_viewer import view_binary_range
 from aia_reverse_lab.tools.memory_dump_analyzer import analyze_memory_dump
 from aia_reverse_lab.tools.opcode_viewer import OpcodeViewerError, disassemble_file_range, disassemble_hex_string, parse_integer as parse_opcode_integer
 from aia_reverse_lab.tools.pcap_analyzer import analyze_pcap
+from aia_reverse_lab.tools.robustness_tester import generate_robustness_corpus
 
 console = Console()
 
@@ -51,6 +52,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--opcode-base", default=None, help="Base address for opcode viewer. Decimal or 0x hex.")
     parser.add_argument("--opcode-arch", default="x64", help="Opcode architecture: x86, x64, arm, arm64. Default: x64")
     parser.add_argument("--opcode-limit", type=int, default=200, help="Max decoded instructions. Default: 200")
+    parser.add_argument("--robustness-input", default=None, help="Generate a local defensive mutation corpus for an input file.")
+    parser.add_argument("--robustness-out", default="robustness_corpus", help="Output directory for robustness corpus. Default: robustness_corpus")
+    parser.add_argument("--robustness-seed", type=int, default=1337, help="Deterministic seed for robustness corpus. Default: 1337")
+    parser.add_argument("--robustness-cases", type=int, default=64, help="Maximum mutation cases. Default: 64")
     parser.add_argument("--tool-json", default=None, help="Optional path to save viewer/tool JSON output.")
     parser.add_argument("--transform", default=None, help="Safe transform operation: base64-decode, base64-encode, hex-decode, hex-encode, url-decode, xor")
     parser.add_argument("--transform-input", default=None, help="Input text for safe transform mode.")
@@ -69,6 +74,47 @@ def save_tool_json(payload: dict, path: str | None) -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         console.print(f"JSON Output : {output}")
+
+
+def run_robustness_mode(args) -> int:
+    try:
+        result = generate_robustness_corpus(
+            args.robustness_input,
+            args.robustness_out,
+            seed=args.robustness_seed,
+            max_cases=max(args.robustness_cases, 1),
+        )
+    except (OSError, ValueError) as exc:
+        console.print(f"[red]Robustness corpus generation failed:[/red] {exc}")
+        return 2
+    summary = Table(title="Defensive Input Robustness Corpus")
+    summary.add_column("Metric")
+    summary.add_column("Value")
+    summary.add_row("Source", str(result.get("source", "")))
+    summary.add_row("Output Dir", str(result.get("output_dir", "")))
+    summary.add_row("Seed", str(result.get("seed", "")))
+    summary.add_row("Cases", str(result.get("case_count", 0)))
+    profile = result.get("source_profile", {})
+    for key in ["length", "sha256", "entropy", "null_ratio", "ascii_ratio", "control_ratio", "unique_byte_count"]:
+        summary.add_row(f"source.{key}", str(profile.get(key, "")))
+    console.print(summary)
+    cases = Table(title="Mutation Cases")
+    for column in ["ID", "Mutation", "Position", "Value", "Length Delta", "Entropy Delta", "Path"]:
+        cases.add_column(column)
+    for item in result.get("cases", [])[:30]:
+        delta = item.get("delta", {})
+        cases.add_row(
+            str(item.get("id", "")),
+            str(item.get("mutation", "")),
+            str(item.get("position", "")),
+            str(item.get("value", "")),
+            str(delta.get("length", "")),
+            str(delta.get("entropy", "")),
+            str(item.get("path", "")),
+        )
+    console.print(cases)
+    save_tool_json(result, args.tool_json)
+    return 0
 
 
 def run_dump_view_mode(args) -> int:
@@ -236,6 +282,8 @@ def print_summary(result) -> None:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if args.robustness_input:
+        return run_robustness_mode(args)
     if args.dump_view:
         return run_dump_view_mode(args)
     if args.memdump:
