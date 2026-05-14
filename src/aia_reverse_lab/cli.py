@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import pefile
@@ -8,6 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from aia_reverse_lab import __version__
+from aia_reverse_lab.analyzers.patch_diff import analyze_binary_diff
 from aia_reverse_lab.analyzers.pe_analyzer import PEAnalyzer
 from aia_reverse_lab.reporting.report_generator import write_reports
 from aia_reverse_lab.storage.database import AnalysisDatabase
@@ -47,6 +49,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=80,
         help="Maximum number of EntryPoint instructions to disassemble. Default: 80",
     )
+    parser.add_argument("--diff-original", default=None, help="Original authorized file for safe binary diff mode.")
+    parser.add_argument("--diff-modified", default=None, help="Modified authorized file for safe binary diff mode.")
+    parser.add_argument("--diff-max-ranges", type=int, default=200, help="Maximum changed ranges to report. Default: 200")
     parser.add_argument(
         "--recent",
         action="store_true",
@@ -64,6 +69,38 @@ def build_parser() -> argparse.ArgumentParser:
         version=f"aia-reverse-lab {__version__}",
     )
     return parser
+
+
+def print_diff_result(diff: dict) -> None:
+    summary = Table(title="Safe Binary Diff Summary")
+    summary.add_column("Field", style="cyan")
+    summary.add_column("Value", style="white")
+    summary.add_row("Original", diff["original_path"])
+    summary.add_row("Modified", diff["modified_path"])
+    summary.add_row("Original SHA256", diff["original_sha256"])
+    summary.add_row("Modified SHA256", diff["modified_sha256"])
+    summary.add_row("Original Size", f"{diff['original_size']:,} bytes")
+    summary.add_row("Modified Size", f"{diff['modified_size']:,} bytes")
+    summary.add_row("Size Delta", str(diff["size_delta"]))
+    summary.add_row("Changed Ranges", str(diff["changed_range_count"]))
+    summary.add_row("Truncated", str(diff["truncated"]))
+    console.print(summary)
+
+    ranges = Table(title="Changed Ranges")
+    ranges.add_column("Start", style="cyan")
+    ranges.add_column("End", style="cyan")
+    ranges.add_column("Length", style="white")
+    ranges.add_column("Original Preview", style="red")
+    ranges.add_column("Modified Preview", style="green")
+    for item in diff["changed_ranges"][:30]:
+        ranges.add_row(
+            str(item["start_offset"]),
+            str(item["end_offset_exclusive"]),
+            str(item["length"]),
+            str(item["original_preview"]),
+            str(item["modified_preview"]),
+        )
+    console.print(ranges)
 
 
 def print_recent(rows: list[dict]) -> None:
@@ -114,9 +151,12 @@ def print_summary(result) -> None:
     summary.add_row("Overlay", f"{result.overlay_size:,} bytes")
     summary.add_row("Strings", str(len(result.strings)))
     summary.add_row("Suspicious APIs", str(len(result.suspicious_apis)))
+    summary.add_row("Anti-analysis", str(len(result.anti_analysis_indicators)))
     summary.add_row("Protector Findings", str(len(result.protector_findings)))
     summary.add_row("YARA Matches", str(len(result.yara_matches)))
     summary.add_row("Disassembly", f"{len(result.disassembly)} instruction(s)")
+    summary.add_row("Flow Blocks", str(result.flow_summary.get("basic_block_count", 0)))
+    summary.add_row("Data Coverage", f"{result.data_requirements.get('coverage_percent', 0)}%")
 
     console.print(summary)
 
@@ -129,70 +169,26 @@ def print_summary(result) -> None:
         risk_table.add_column("Title", style="white")
         risk_table.add_column("Detail", style="white")
         for item in risk_findings[:15]:
-            risk_table.add_row(
-                str(item.get("points", 0)),
-                str(item.get("severity", "")),
-                str(item.get("category", "")),
-                str(item.get("title", "")),
-                str(item.get("detail", "")),
-            )
+            risk_table.add_row(str(item.get("points", 0)), str(item.get("severity", "")), str(item.get("category", "")), str(item.get("title", "")), str(item.get("detail", "")))
         console.print(risk_table)
 
-    if result.protector_findings:
-        protector_table = Table(title="Protector / Packer Indicators")
-        protector_table.add_column("Name", style="magenta")
-        protector_table.add_column("Confidence", style="cyan")
-        protector_table.add_column("Reason", style="white")
-        for finding in result.protector_findings[:10]:
-            protector_table.add_row(
-                str(finding.get("name", "unknown")),
-                str(finding.get("confidence", "unknown")),
-                str(finding.get("reason", "")),
-            )
-        console.print(protector_table)
+    if result.anti_analysis_indicators:
+        anti_table = Table(title="Anti-analysis Indicators")
+        anti_table.add_column("Type", style="cyan")
+        anti_table.add_column("Category", style="yellow")
+        anti_table.add_column("Value", style="white")
+        anti_table.add_column("Source", style="white")
+        for item in result.anti_analysis_indicators[:20]:
+            anti_table.add_row(str(item.get("type", "")), str(item.get("category", "")), str(item.get("value", "")), str(item.get("source", "")))
+        console.print(anti_table)
 
-    if result.disassembly:
-        disasm_table = Table(title="EntryPoint Disassembly")
-        disasm_table.add_column("Address", style="cyan")
-        disasm_table.add_column("Bytes", style="white")
-        disasm_table.add_column("Instruction", style="green")
-        for item in result.disassembly[:30]:
-            disasm_table.add_row(
-                str(item.get("address", "")),
-                str(item.get("bytes", "")),
-                f"{item.get('mnemonic', '')} {item.get('op_str', '')}".strip(),
-            )
-        console.print(disasm_table)
-
-    if result.yara_matches:
-        yara_table = Table(title="YARA Matches")
-        yara_table.add_column("Rule", style="magenta")
-        yara_table.add_column("Namespace", style="cyan")
-        yara_table.add_column("Tags", style="white")
-        yara_table.add_column("Strings", style="white")
-        for item in result.yara_matches[:15]:
-            yara_table.add_row(
-                str(item.get("rule", "")),
-                str(item.get("namespace", "")),
-                ", ".join(item.get("tags", [])),
-                str(item.get("string_match_count", 0)),
-            )
-        console.print(yara_table)
-
-    if result.suspicious_apis:
-        api_table = Table(title="Suspicious API Indicators")
-        api_table.add_column("Severity", style="red")
-        api_table.add_column("Category", style="cyan")
-        api_table.add_column("DLL", style="white")
-        api_table.add_column("Function", style="white")
-        for item in result.suspicious_apis[:15]:
-            api_table.add_row(
-                item.get("severity", ""),
-                item.get("category", ""),
-                item.get("dll", ""),
-                item.get("function", ""),
-            )
-        console.print(api_table)
+    if result.flow_summary.get("available"):
+        flow_table = Table(title="Static Flow Summary")
+        flow_table.add_column("Metric", style="cyan")
+        flow_table.add_column("Value", style="white")
+        for key in ["instruction_count", "basic_block_count", "edge_count", "branch_count", "call_count", "return_count"]:
+            flow_table.add_row(key, str(result.flow_summary.get(key, 0)))
+        console.print(flow_table)
 
     if result.warnings:
         console.print("[yellow]Warnings[/yellow]")
@@ -203,6 +199,23 @@ def print_summary(result) -> None:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.diff_original or args.diff_modified:
+        if not args.diff_original or not args.diff_modified:
+            console.print("[red]Both --diff-original and --diff-modified are required for diff mode.[/red]")
+            return 2
+        try:
+            diff = analyze_binary_diff(args.diff_original, args.diff_modified, max_ranges=max(args.diff_max_ranges, 1))
+        except OSError as exc:
+            console.print(f"[red]Failed to read diff input file:[/red] {exc}")
+            return 4
+        print_diff_result(diff)
+        output_dir = Path(args.out)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        diff_path = output_dir / "binary_diff.json"
+        diff_path.write_text(json.dumps(diff, ensure_ascii=False, indent=2), encoding="utf-8")
+        console.print(f"Diff JSON : {diff_path}")
+        return 0
 
     db = AnalysisDatabase(args.db)
 
@@ -229,12 +242,7 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        result = PEAnalyzer().analyze(
-            target,
-            yara_rules=args.yara_rules,
-            disassemble=args.disasm,
-            disasm_limit=args.disasm_limit,
-        )
+        result = PEAnalyzer().analyze(target, yara_rules=args.yara_rules, disassemble=args.disasm, disasm_limit=args.disasm_limit)
         report_paths = write_reports(result, output_dir)
         analysis_id = db.insert_analysis(result, report_paths)
     except pefile.PEFormatError as exc:
@@ -246,7 +254,7 @@ def main() -> int:
 
     console.print("[bold cyan]AIA Reverse Lab[/bold cyan]")
     print_summary(result)
-    console.print("[green]Step 9 risk scoring completed.[/green]")
+    console.print("[green]Step 9.5 safe flow/diff/data analysis completed.[/green]")
     console.print(f"Analysis ID : {analysis_id}")
     console.print(f"Database    : {Path(args.db)}")
     console.print(f"JSON Report : {report_paths['json']}")
