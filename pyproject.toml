@@ -19,7 +19,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+disasm = [
+  "capstone>=5.0.0"
+]
 yara = [
+  "yara-python>=4.5.0"
+]
+all = [
+  "capstone>=5.0.0",
   "yara-python>=4.5.0"
 ]
 dev = [
