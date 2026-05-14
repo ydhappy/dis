@@ -13,21 +13,11 @@ from aia_reverse_lab.analyzers.patch_diff import analyze_binary_diff
 from aia_reverse_lab.analyzers.pe_analyzer import PEAnalyzer
 from aia_reverse_lab.reporting.report_generator import write_reports
 from aia_reverse_lab.storage.database import AnalysisDatabase
-from aia_reverse_lab.tools.crypto_transform import (
-    TransformError,
-    read_input_bytes,
-    transform_bytes,
-    write_output_bytes,
-)
+from aia_reverse_lab.tools.crypto_transform import TransformError, read_input_bytes, transform_bytes, write_output_bytes
 from aia_reverse_lab.tools.dump_viewer import parse_integer as parse_dump_integer
 from aia_reverse_lab.tools.dump_viewer import view_binary_range
 from aia_reverse_lab.tools.memory_dump_analyzer import analyze_memory_dump
-from aia_reverse_lab.tools.opcode_viewer import (
-    OpcodeViewerError,
-    disassemble_file_range,
-    disassemble_hex_string,
-    parse_integer as parse_opcode_integer,
-)
+from aia_reverse_lab.tools.opcode_viewer import OpcodeViewerError, disassemble_file_range, disassemble_hex_string, parse_integer as parse_opcode_integer
 from aia_reverse_lab.tools.pcap_analyzer import analyze_pcap
 
 console = Console()
@@ -74,12 +64,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def save_tool_json(payload: dict, path: str | None) -> None:
-    if not path:
-        return
-    output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    console.print(f"JSON Output : {output}")
+    if path:
+        output = Path(path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        console.print(f"JSON Output : {output}")
 
 
 def run_dump_view_mode(args) -> int:
@@ -89,9 +78,8 @@ def run_dump_view_mode(args) -> int:
         console.print(f"[red]Dump view failed:[/red] {exc}")
         return 2
     table = Table(title="Binary Dump View")
-    table.add_column("Offset", style="cyan")
-    table.add_column("Hex", style="white")
-    table.add_column("ASCII", style="green")
+    for column in ["Offset", "Hex", "ASCII"]:
+        table.add_column(column)
     for row in result["rows"]:
         table.add_row(row["offset"], row["hex"], row["ascii"])
     console.print(table)
@@ -107,19 +95,11 @@ def run_memory_dump_mode(args) -> int:
         console.print(f"[red]Memory dump analysis failed:[/red] {exc}")
         return 2
     summary = Table(title="Offline Memory Dump Analysis")
-    summary.add_column("Metric", style="cyan")
-    summary.add_column("Value", style="white")
+    summary.add_column("Metric")
+    summary.add_column("Value")
     for key in ["path", "size", "mz_signature_count", "pe_signature_count", "string_count", "high_entropy_region_count"]:
         summary.add_row(key, str(result.get(key, "")))
     console.print(summary)
-    if result.get("strings"):
-        strings = Table(title="Dump Strings")
-        strings.add_column("Offset", style="cyan")
-        strings.add_column("Length", style="white")
-        strings.add_column("Value", style="white")
-        for item in result["strings"][:30]:
-            strings.add_row(str(item["offset"]), str(item["length"]), str(item["value"]))
-        console.print(strings)
     save_tool_json(result, args.tool_json)
     return 0
 
@@ -131,15 +111,14 @@ def run_pcap_mode(args) -> int:
         console.print(f"[red]PCAP analysis failed:[/red] {exc}")
         return 2
     summary = Table(title="Offline PCAP Analysis")
-    summary.add_column("Metric", style="cyan")
-    summary.add_column("Value", style="white")
+    summary.add_column("Metric")
+    summary.add_column("Value")
     for key in ["path", "size", "version", "snaplen", "network", "packet_count_returned"]:
         summary.add_row(key, str(result.get(key, "")))
     console.print(summary)
     packets = Table(title="Packets")
-    packets.add_column("Time", style="cyan")
-    packets.add_column("Layers", style="white")
-    packets.add_column("Payload Preview", style="green")
+    for column in ["Time", "Layers", "Payload Preview"]:
+        packets.add_column(column)
     for packet in result.get("packets", [])[:50]:
         layers = " / ".join(layer.get("name", "?") for layer in packet.get("layers", []))
         packets.add_row(str(packet.get("timestamp", "")), layers, str(packet.get("payload_preview_ascii", packet.get("payload_preview_hex", ""))))
@@ -159,13 +138,11 @@ def run_opcode_mode(args) -> int:
         console.print(f"[red]Opcode viewer failed:[/red] {exc}")
         return 2
     table = Table(title="Opcode Viewer")
-    table.add_column("Address", style="cyan")
-    table.add_column("Bytes", style="white")
-    table.add_column("Instruction", style="green")
+    for column in ["Address", "Bytes", "Instruction"]:
+        table.add_column(column)
     for item in result.get("instructions", []):
         table.add_row(item["address"], item["bytes"], f"{item['mnemonic']} {item['op_str']}".strip())
     console.print(table)
-    console.print(f"Instructions: {result.get('instruction_count', 0)} | Bytes: {result.get('byte_count', 0)}")
     save_tool_json(result, args.tool_json)
     return 0
 
@@ -184,8 +161,8 @@ def run_transform_mode(args) -> int:
 
 def print_diff_result(diff: dict) -> None:
     summary = Table(title="Safe Binary Diff Summary")
-    summary.add_column("Field", style="cyan")
-    summary.add_column("Value", style="white")
+    summary.add_column("Field")
+    summary.add_column("Value")
     for key in ["original_path", "modified_path", "original_sha256", "modified_sha256", "original_size", "modified_size", "size_delta", "changed_range_count", "truncated"]:
         summary.add_row(key, str(diff.get(key, "")))
     console.print(summary)
@@ -206,14 +183,17 @@ def print_summary(result) -> None:
     tls = features.get("tls", {})
     crypto = result.crypto_analysis or {}
     problems = result.problem_locations or {}
+    exposure = result.exposure_assessment or {}
     summary = Table(title="PE Analysis Summary")
-    summary.add_column("Field", style="cyan")
-    summary.add_column("Value", style="white")
+    summary.add_column("Field")
+    summary.add_column("Value")
     rows = {
         "Path": result.path,
         "Size": f"{result.size:,} bytes",
         "SHA256": result.hashes.sha256,
         "Risk": f"{result.risk.get('score', 0)} / {result.risk.get('severity', 'low')}",
+        "Exposure Score": f"{exposure.get('hardening_score', 0)} / {exposure.get('severity', 'unknown')}",
+        "Potential Score Gain": exposure.get("potential_score_gain", 0),
         "VMProtect": f"{vmp.get('classification', 'unknown')} / {vmp.get('confidence_score', 0)}",
         "Problem Locations": problems.get("location_count", 0),
         "EntryPoint Section": features.get("entry_point_section", ""),
@@ -231,20 +211,20 @@ def print_summary(result) -> None:
         summary.add_row(key, str(value))
     console.print(summary)
 
+    if exposure.get("findings"):
+        table = Table(title="Exposure Findings / Score Improvement")
+        for column in ["Penalty", "Gain", "Severity", "Category", "Title", "Evidence", "Remediation"]:
+            table.add_column(column)
+        for item in exposure.get("findings", [])[:15]:
+            table.add_row(str(item.get("penalty", 0)), str(item.get("remediation_gain", 0)), str(item.get("severity", "")), str(item.get("category", "")), str(item.get("title", "")), str(item.get("evidence", "")), str(item.get("remediation", "")))
+        console.print(table)
+
     if problems.get("locations"):
         table = Table(title="Top Problem Locations")
         for column in ["Priority", "Category", "Title", "Address/Offset", "Section", "Reason", "Suggested Action"]:
             table.add_column(column)
         for item in problems.get("locations", [])[:15]:
             table.add_row(str(item.get("priority", "")), str(item.get("category", "")), str(item.get("title", "")), str(item.get("address_or_offset", "")), str(item.get("section", "")), str(item.get("reason", "")), str(item.get("suggested_action", "")))
-        console.print(table)
-
-    if vmp.get("evidence"):
-        table = Table(title="VMProtect Evidence")
-        for column in ["Points", "Severity", "Category", "Title", "Detail"]:
-            table.add_column(column)
-        for item in vmp.get("evidence", [])[:20]:
-            table.add_row(str(item.get("points", 0)), str(item.get("severity", "")), str(item.get("category", "")), str(item.get("title", "")), str(item.get("detail", "")))
         console.print(table)
 
     if result.warnings:
@@ -256,7 +236,6 @@ def print_summary(result) -> None:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-
     if args.dump_view:
         return run_dump_view_mode(args)
     if args.memdump:
@@ -267,7 +246,6 @@ def main() -> int:
         return run_opcode_mode(args)
     if args.transform:
         return run_transform_mode(args)
-
     if args.diff_original or args.diff_modified:
         if not args.diff_original or not args.diff_modified:
             console.print("[red]Both --diff-original and --diff-modified are required for diff mode.[/red]")
@@ -290,11 +268,9 @@ def main() -> int:
         rows = db.list_recent(limit=max(args.recent_limit, 1))
         print_recent(rows)
         return 0
-
     if not args.target:
         parser.print_help()
         return 0
-
     target = Path(args.target)
     output_dir = Path(args.out)
     if not target.exists():
@@ -314,10 +290,9 @@ def main() -> int:
     except OSError as exc:
         console.print(f"[red]Failed to read or write file:[/red] {exc}")
         return 4
-
     console.print("[bold cyan]AIA Reverse Lab[/bold cyan]")
     print_summary(result)
-    console.print("[green]Step 9.10 problem locator completed.[/green]")
+    console.print("[green]Exposure assessment completed.[/green]")
     console.print(f"Analysis ID : {analysis_id}")
     console.print(f"Database    : {Path(args.db)}")
     console.print(f"JSON Report : {report_paths['json']}")
