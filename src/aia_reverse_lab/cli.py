@@ -20,6 +20,7 @@ from aia_reverse_lab.tools.dump_viewer import view_binary_range
 from aia_reverse_lab.tools.memory_dump_analyzer import analyze_memory_dump
 from aia_reverse_lab.tools.opcode_viewer import OpcodeViewerError, disassemble_file_range, disassemble_hex_string, parse_integer as parse_opcode_integer
 from aia_reverse_lab.tools.pcap_analyzer import analyze_pcap
+from aia_reverse_lab.tools.result_triage import triage_result_file
 from aia_reverse_lab.tools.robustness_tester import generate_robustness_corpus
 
 console = Console()
@@ -61,6 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bypass-sample-file", default=None, help="Local defensive bypass-resilience sample file.")
     parser.add_argument("--bypass-rules", default=None, help="JSON regex rules for bypass-resilience testing.")
     parser.add_argument("--bypass-max-variants", type=int, default=200, help="Maximum bypass-resilience variants. Default: 200")
+    parser.add_argument("--triage-results", default=None, help="Triage JSON/JSONL corpus execution results.")
     parser.add_argument("--tool-json", default=None, help="Optional path to save viewer/tool JSON output.")
     parser.add_argument("--transform", default=None, help="Safe transform operation: base64-decode, base64-encode, hex-decode, hex-encode, url-decode, xor")
     parser.add_argument("--transform-input", default=None, help="Input text for safe transform mode.")
@@ -81,17 +83,54 @@ def save_tool_json(payload: dict, path: str | None) -> None:
         console.print(f"JSON Output : {output}")
 
 
+def run_triage_mode(args) -> int:
+    try:
+        result = triage_result_file(args.triage_results)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        console.print(f"[red]Result triage failed:[/red] {exc}")
+        return 2
+    summary = Table(title="Result Triage Summary")
+    summary.add_column("Metric")
+    summary.add_column("Value")
+    summary.add_row("Source", str(result.get("source", "")))
+    summary.add_row("Records", str(result.get("record_count", 0)))
+    summary.add_row("Status Counts", json.dumps(result.get("status_counts", {}), ensure_ascii=False))
+    summary.add_row("Severity Counts", json.dumps(result.get("severity_counts", {}), ensure_ascii=False))
+    summary.add_row("Keyword Counts", json.dumps(result.get("keyword_counts", {}), ensure_ascii=False))
+    console.print(summary)
+
+    if result.get("mutation_stats"):
+        table = Table(title="Mutation Failure Stats")
+        for column in ["Mutation", "Count", "Fail", "Crash", "Timeout", "Fail Rate"]:
+            table.add_column(column)
+        for item in result.get("mutation_stats", [])[:20]:
+            table.add_row(str(item.get("mutation", "")), str(item.get("count", 0)), str(item.get("fail_count", 0)), str(item.get("crash_count", 0)), str(item.get("timeout_count", 0)), str(item.get("fail_rate", 0)))
+        console.print(table)
+
+    if result.get("top_failures"):
+        table = Table(title="Top Failing Cases")
+        for column in ["Case", "Mutation", "Status", "Severity", "Exit", "Duration", "Tags", "Path"]:
+            table.add_column(column)
+        for item in result.get("top_failures", [])[:20]:
+            table.add_row(str(item.get("case_id", "")), str(item.get("mutation", "")), str(item.get("status", "")), str(item.get("severity", "")), str(item.get("exit_code", "")), str(item.get("duration_ms", "")), ",".join(item.get("tags", [])), str(item.get("case_path", "")))
+        console.print(table)
+
+    if result.get("remediation_hints"):
+        table = Table(title="Triage Remediation Hints")
+        table.add_column("Hint")
+        for hint in result.get("remediation_hints", []):
+            table.add_row(str(hint))
+        console.print(table)
+    save_tool_json(result, args.tool_json)
+    return 0
+
+
 def run_bypass_mode(args) -> int:
     if not args.bypass_rules:
         console.print("[red]--bypass-rules is required for bypass resilience mode.[/red]")
         return 2
     try:
-        result = run_bypass_resilience_lab(
-            sample=args.bypass_sample,
-            sample_file=args.bypass_sample_file,
-            rules_file=args.bypass_rules,
-            max_variants=max(args.bypass_max_variants, 1),
-        )
+        result = run_bypass_resilience_lab(sample=args.bypass_sample, sample_file=args.bypass_sample_file, rules_file=args.bypass_rules, max_variants=max(args.bypass_max_variants, 1))
     except (OSError, ValueError, json.JSONDecodeError, KeyError) as exc:
         console.print(f"[red]Bypass resilience test failed:[/red] {exc}")
         return 2
@@ -101,14 +140,12 @@ def run_bypass_mode(args) -> int:
     for key in ["sample_length", "rule_count", "variant_count", "hit_variant_count", "miss_variant_count", "miss_rate"]:
         summary.add_row(key, str(result.get(key, "")))
     console.print(summary)
-
     variants = Table(title="Variant Rule Results")
     for column in ["ID", "Kind", "Hits", "Missed", "Preview"]:
         variants.add_column(column)
     for item in result.get("results", [])[:40]:
         variants.add_row(str(item.get("variant_id", "")), str(item.get("kind", "")), ",".join(item.get("hits", [])), str(item.get("missed", "")), str(item.get("value_preview", "")))
     console.print(variants)
-
     if result.get("remediation_hints"):
         hints = Table(title="Remediation Hints")
         hints.add_column("Hint")
@@ -312,6 +349,8 @@ def print_summary(result) -> None:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if args.triage_results:
+        return run_triage_mode(args)
     if args.bypass_sample or args.bypass_sample_file:
         return run_bypass_mode(args)
     if args.robustness_input:
