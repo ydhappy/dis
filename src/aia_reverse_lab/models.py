@@ -70,6 +70,9 @@ class PEAnalysisResult:
     protector_findings: list[dict[str, Any]] = field(default_factory=list)
     yara_matches: list[dict[str, Any]] = field(default_factory=list)
     disassembly: list[dict[str, Any]] = field(default_factory=list)
+    flow_summary: dict[str, Any] = field(default_factory=dict)
+    anti_analysis_indicators: list[dict[str, Any]] = field(default_factory=list)
+    data_requirements: dict[str, Any] = field(default_factory=dict)
     risk: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
@@ -96,6 +99,9 @@ class PEAnalysisResult:
             "protector_findings": list(self.protector_findings),
             "yara_matches": list(self.yara_matches),
             "disassembly": list(self.disassembly),
+            "flow_summary": dict(self.flow_summary),
+            "anti_analysis_indicators": list(self.anti_analysis_indicators),
+            "data_requirements": dict(self.data_requirements),
             "risk": dict(self.risk),
             "warnings": list(self.warnings),
         }
