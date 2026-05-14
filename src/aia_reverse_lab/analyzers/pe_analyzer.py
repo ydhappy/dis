@@ -7,12 +7,15 @@ from pathlib import Path
 
 import pefile
 
+from aia_reverse_lab.analyzers.anti_analysis import detect_anti_analysis
 from aia_reverse_lab.analyzers.api_classifier import classify_imports
+from aia_reverse_lab.analyzers.data_requirements import analyze_required_data
 from aia_reverse_lab.analyzers.disassembler import (
     CapstoneUnavailableError,
     UnsupportedArchitectureError,
     disassemble_entry_point,
 )
+from aia_reverse_lab.analyzers.flow_summary import build_flow_summary
 from aia_reverse_lab.analyzers.protector_detector import detect_overlay_size, detect_protectors
 from aia_reverse_lab.analyzers.risk_scorer import score_analysis
 from aia_reverse_lab.analyzers.string_analyzer import extract_strings
@@ -128,6 +131,7 @@ class PEAnalyzer:
             suspicious_apis = classify_imports(imports)
             overlay_size = detect_overlay_size(pe, file_size)
             protector_findings = detect_protectors(sections, imports, strings, overlay_size)
+            anti_analysis_indicators = detect_anti_analysis(imports, strings)
             yara_matches: list[dict] = []
             disassembly: list[dict] = []
 
@@ -143,6 +147,7 @@ class PEAnalyzer:
                 except (CapstoneUnavailableError, UnsupportedArchitectureError) as exc:
                     warnings.append(str(exc))
 
+            flow_summary = build_flow_summary(disassembly)
             risk = score_analysis(
                 sections=sections,
                 imports=imports,
@@ -168,12 +173,14 @@ class PEAnalyzer:
                 warnings.append(f"Overlay data detected: {overlay_size:,} bytes.")
             if protector_findings:
                 warnings.append("Packer/protector indicators were detected.")
+            if anti_analysis_indicators:
+                warnings.append(f"Anti-analysis indicators detected: {len(anti_analysis_indicators)}.")
             if yara_matches:
                 warnings.append(f"YARA matched {len(yara_matches)} rule(s).")
             if disassemble and not disassembly:
                 warnings.append("Entry point disassembly did not return any instructions.")
 
-            return PEAnalysisResult(
+            result = PEAnalysisResult(
                 path=str(path),
                 size=file_size,
                 hashes=hashes,
@@ -195,9 +202,13 @@ class PEAnalyzer:
                 protector_findings=protector_findings,
                 yara_matches=yara_matches,
                 disassembly=disassembly,
+                flow_summary=flow_summary,
+                anti_analysis_indicators=anti_analysis_indicators,
                 risk=risk,
                 warnings=warnings,
             )
+            result.data_requirements = analyze_required_data(result)
+            return result
         finally:
             pe.close()
 
