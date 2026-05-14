@@ -9,25 +9,24 @@ def analyze_required_data(result) -> dict[str, Any]:
         check("file_hashes", bool(result.hashes.sha256), "File hashes are available."),
         check("pe_headers", bool(result.machine and result.entry_point), "PE metadata is available."),
         check("pe_features", bool(result.pe_features), "Rich PE layout features are available."),
-        check(
-            "entrypoint_section",
-            bool(result.pe_features.get("entry_point_section")),
-            "EntryPoint-to-section mapping is available.",
-        ),
-        check(
-            "section_anomalies",
-            bool(result.pe_features.get("section_anomalies")),
-            "Section anomaly analysis was generated.",
-        ),
-        check(
-            "tls_analysis",
-            "tls" in result.pe_features,
-            "TLS directory analysis was generated.",
-        ),
+        check("entrypoint_section", bool(result.pe_features.get("entry_point_section")), "EntryPoint-to-section mapping is available."),
+        check("section_anomalies", bool(result.pe_features.get("section_anomalies")), "Section anomaly analysis was generated."),
+        check("tls_analysis", "tls" in result.pe_features, "TLS directory analysis was generated."),
         check("sections", bool(result.sections), "Section table is available."),
         check("imports", bool(result.imports), "Import table is available."),
         check("exports", bool(result.exports), "Export table is available."),
         check("strings", bool(result.strings), "Static strings were extracted."),
+        check("crypto_analysis", bool(result.crypto_analysis), "Crypto static analysis was generated."),
+        check(
+            "crypto_indicators",
+            bool(
+                result.crypto_analysis.get("crypto_api_count", 0)
+                or result.crypto_analysis.get("constant_count", 0)
+                or result.crypto_analysis.get("encoded_candidate_count", 0)
+                or result.crypto_analysis.get("high_entropy_region_count", 0)
+            ),
+            "Crypto, encoding, or high-entropy indicators were found.",
+        ),
         check("suspicious_apis", bool(result.suspicious_apis), "Suspicious API indicators were found."),
         check("protector_findings", bool(result.protector_findings), "Protector/packer indicators were found."),
         check("vmprotect_profile", bool(result.vmprotect_profile), "VMProtect profile analysis was generated."),
