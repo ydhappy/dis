@@ -14,11 +14,13 @@ def score_analysis(
     strings: list[dict[str, Any]],
     disassembly: list[dict[str, Any]],
     vmprotect_profile: dict[str, Any] | None = None,
+    pe_features: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Score static analysis indicators into a defensive triage risk summary.
 
     The score is heuristic. It is intended for prioritization, not attribution or proof of malware.
     """
+    pe_features = pe_features or {}
     findings: list[dict[str, Any]] = []
     score = 0
 
@@ -27,6 +29,28 @@ def score_analysis(
         points = min(20, 8 + len(high_entropy_sections) * 4)
         score += points
         findings.append(build_finding(points, "medium", "packing", "High entropy section(s)", ", ".join(section.name for section in high_entropy_sections[:10])))
+
+    entry_entropy = pe_features.get("entry_point_section_entropy")
+    if isinstance(entry_entropy, (int, float)) and entry_entropy >= 7.2:
+        score += 12
+        findings.append(build_finding(12, "medium", "pe_layout", "EntryPoint section high entropy", f"EntryPoint section entropy is {entry_entropy}."))
+
+    entry_permissions = pe_features.get("entry_point_section_permissions") or {}
+    if entry_permissions.get("rwx"):
+        score += 12
+        findings.append(build_finding(12, "medium", "pe_layout", "EntryPoint section is RWX", str(entry_permissions)))
+
+    tls = pe_features.get("tls", {})
+    if tls.get("present"):
+        points = 8 if int(tls.get("callback_count", 0) or 0) else 4
+        score += points
+        findings.append(build_finding(points, "low", "pe_layout", "TLS directory present", f"callback_count={tls.get('callback_count', 0)}"))
+
+    section_anomalies = pe_features.get("section_anomalies", [])
+    if section_anomalies:
+        points = min(20, len(section_anomalies) * 4)
+        score += points
+        findings.append(build_finding(points, "medium", "pe_layout", "Section layout anomalies", f"{len(section_anomalies)} anomaly/anomalies detected."))
 
     import_count = sum(len(item.functions) for item in imports)
     if import_count == 0:
@@ -89,22 +113,11 @@ def score_analysis(
 
     normalized_score = min(score, 100)
     severity = severity_from_score(normalized_score)
-    return {
-        "score": normalized_score,
-        "severity": severity,
-        "finding_count": len(findings),
-        "findings": collapse_findings(findings),
-    }
+    return {"score": normalized_score, "severity": severity, "finding_count": len(findings), "findings": collapse_findings(findings)}
 
 
 def build_finding(points: int, severity: str, category: str, title: str, detail: str) -> dict[str, Any]:
-    return {
-        "points": points,
-        "severity": severity,
-        "category": category,
-        "title": title,
-        "detail": detail,
-    }
+    return {"points": points, "severity": severity, "category": category, "title": title, "detail": detail}
 
 
 def severity_from_score(score: int) -> str:
