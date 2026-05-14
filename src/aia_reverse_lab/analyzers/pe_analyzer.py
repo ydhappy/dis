@@ -180,6 +180,7 @@ class PEAnalyzer:
                 strings=strings,
                 disassembly=disassembly,
                 vmprotect_profile=vmprotect_profile,
+                pe_features=pe_features,
             )
 
             if not imports:
