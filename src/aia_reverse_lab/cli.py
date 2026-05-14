@@ -13,6 +13,7 @@ from aia_reverse_lab.analyzers.patch_diff import analyze_binary_diff
 from aia_reverse_lab.analyzers.pe_analyzer import PEAnalyzer
 from aia_reverse_lab.reporting.report_generator import write_reports
 from aia_reverse_lab.storage.database import AnalysisDatabase
+from aia_reverse_lab.tools.bypass_resilience import run_bypass_resilience_lab
 from aia_reverse_lab.tools.crypto_transform import TransformError, read_input_bytes, transform_bytes, write_output_bytes
 from aia_reverse_lab.tools.dump_viewer import parse_integer as parse_dump_integer
 from aia_reverse_lab.tools.dump_viewer import view_binary_range
@@ -56,6 +57,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--robustness-out", default="robustness_corpus", help="Output directory for robustness corpus. Default: robustness_corpus")
     parser.add_argument("--robustness-seed", type=int, default=1337, help="Deterministic seed for robustness corpus. Default: 1337")
     parser.add_argument("--robustness-cases", type=int, default=64, help="Maximum mutation cases. Default: 64")
+    parser.add_argument("--bypass-sample", default=None, help="Local defensive bypass-resilience test sample string.")
+    parser.add_argument("--bypass-sample-file", default=None, help="Local defensive bypass-resilience sample file.")
+    parser.add_argument("--bypass-rules", default=None, help="JSON regex rules for bypass-resilience testing.")
+    parser.add_argument("--bypass-max-variants", type=int, default=200, help="Maximum bypass-resilience variants. Default: 200")
     parser.add_argument("--tool-json", default=None, help="Optional path to save viewer/tool JSON output.")
     parser.add_argument("--transform", default=None, help="Safe transform operation: base64-decode, base64-encode, hex-decode, hex-encode, url-decode, xor")
     parser.add_argument("--transform-input", default=None, help="Input text for safe transform mode.")
@@ -76,14 +81,47 @@ def save_tool_json(payload: dict, path: str | None) -> None:
         console.print(f"JSON Output : {output}")
 
 
+def run_bypass_mode(args) -> int:
+    if not args.bypass_rules:
+        console.print("[red]--bypass-rules is required for bypass resilience mode.[/red]")
+        return 2
+    try:
+        result = run_bypass_resilience_lab(
+            sample=args.bypass_sample,
+            sample_file=args.bypass_sample_file,
+            rules_file=args.bypass_rules,
+            max_variants=max(args.bypass_max_variants, 1),
+        )
+    except (OSError, ValueError, json.JSONDecodeError, KeyError) as exc:
+        console.print(f"[red]Bypass resilience test failed:[/red] {exc}")
+        return 2
+    summary = Table(title="Bypass Resilience Lab")
+    summary.add_column("Metric")
+    summary.add_column("Value")
+    for key in ["sample_length", "rule_count", "variant_count", "hit_variant_count", "miss_variant_count", "miss_rate"]:
+        summary.add_row(key, str(result.get(key, "")))
+    console.print(summary)
+
+    variants = Table(title="Variant Rule Results")
+    for column in ["ID", "Kind", "Hits", "Missed", "Preview"]:
+        variants.add_column(column)
+    for item in result.get("results", [])[:40]:
+        variants.add_row(str(item.get("variant_id", "")), str(item.get("kind", "")), ",".join(item.get("hits", [])), str(item.get("missed", "")), str(item.get("value_preview", "")))
+    console.print(variants)
+
+    if result.get("remediation_hints"):
+        hints = Table(title="Remediation Hints")
+        hints.add_column("Hint")
+        for hint in result.get("remediation_hints", []):
+            hints.add_row(str(hint))
+        console.print(hints)
+    save_tool_json(result, args.tool_json)
+    return 0
+
+
 def run_robustness_mode(args) -> int:
     try:
-        result = generate_robustness_corpus(
-            args.robustness_input,
-            args.robustness_out,
-            seed=args.robustness_seed,
-            max_cases=max(args.robustness_cases, 1),
-        )
+        result = generate_robustness_corpus(args.robustness_input, args.robustness_out, seed=args.robustness_seed, max_cases=max(args.robustness_cases, 1))
     except (OSError, ValueError) as exc:
         console.print(f"[red]Robustness corpus generation failed:[/red] {exc}")
         return 2
@@ -103,15 +141,7 @@ def run_robustness_mode(args) -> int:
         cases.add_column(column)
     for item in result.get("cases", [])[:30]:
         delta = item.get("delta", {})
-        cases.add_row(
-            str(item.get("id", "")),
-            str(item.get("mutation", "")),
-            str(item.get("position", "")),
-            str(item.get("value", "")),
-            str(delta.get("length", "")),
-            str(delta.get("entropy", "")),
-            str(item.get("path", "")),
-        )
+        cases.add_row(str(item.get("id", "")), str(item.get("mutation", "")), str(item.get("position", "")), str(item.get("value", "")), str(delta.get("length", "")), str(delta.get("entropy", "")), str(item.get("path", "")))
     console.print(cases)
     save_tool_json(result, args.tool_json)
     return 0
@@ -282,6 +312,8 @@ def print_summary(result) -> None:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if args.bypass_sample or args.bypass_sample_file:
+        return run_bypass_mode(args)
     if args.robustness_input:
         return run_robustness_mode(args)
     if args.dump_view:
