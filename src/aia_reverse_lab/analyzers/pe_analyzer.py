@@ -7,6 +7,9 @@ from pathlib import Path
 
 import pefile
 
+from aia_reverse_lab.analyzers.api_classifier import classify_imports
+from aia_reverse_lab.analyzers.protector_detector import detect_overlay_size, detect_protectors
+from aia_reverse_lab.analyzers.string_analyzer import extract_strings
 from aia_reverse_lab.models import (
     ExportInfo,
     FileHashes,
@@ -100,6 +103,7 @@ class PEAnalyzer:
     def analyze(self, target: str | Path) -> PEAnalysisResult:
         path = Path(target)
         warnings: list[str] = []
+        file_size = path.stat().st_size
         hashes = calculate_hashes(path)
         pe = pefile.PE(str(path), fast_load=False)
 
@@ -107,6 +111,10 @@ class PEAnalyzer:
             sections = self._extract_sections(pe)
             imports = self._extract_imports(pe)
             exports = self._extract_exports(pe)
+            strings = extract_strings(path)
+            suspicious_apis = classify_imports(imports)
+            overlay_size = detect_overlay_size(pe, file_size)
+            protector_findings = detect_protectors(sections, imports, strings, overlay_size)
 
             machine_value = pe.FILE_HEADER.Machine
             subsystem_value = pe.OPTIONAL_HEADER.Subsystem
@@ -118,10 +126,14 @@ class PEAnalyzer:
                 warnings.append("No import table was found or import table is empty.")
             if not sections:
                 warnings.append("No sections were found.")
+            if overlay_size:
+                warnings.append(f"Overlay data detected: {overlay_size:,} bytes.")
+            if protector_findings:
+                warnings.append("Packer/protector indicators were detected.")
 
             return PEAnalysisResult(
                 path=str(path),
-                size=path.stat().st_size,
+                size=file_size,
                 hashes=hashes,
                 machine=MACHINE_TYPES.get(machine_value, f"unknown-0x{machine_value:04X}"),
                 architecture=machine_to_architecture(machine_value),
@@ -132,9 +144,13 @@ class PEAnalyzer:
                 section_count=len(sections),
                 import_count=sum(len(item.functions) for item in imports),
                 export_count=len(exports),
+                overlay_size=overlay_size,
                 sections=sections,
                 imports=imports,
                 exports=exports,
+                strings=strings,
+                suspicious_apis=suspicious_apis,
+                protector_findings=protector_findings,
                 warnings=warnings,
             )
         finally:
