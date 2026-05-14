@@ -72,6 +72,7 @@ class PEAnalysisResult:
     imports: list[ImportInfo] = field(default_factory=list)
     exports: list[ExportInfo] = field(default_factory=list)
     strings: list[dict[str, Any]] = field(default_factory=list)
+    crypto_analysis: dict[str, Any] = field(default_factory=dict)
     suspicious_apis: list[dict[str, str]] = field(default_factory=list)
     protector_findings: list[dict[str, Any]] = field(default_factory=list)
     vmprotect_profile: dict[str, Any] = field(default_factory=dict)
@@ -103,6 +104,7 @@ class PEAnalysisResult:
             "imports": [item.to_dict() for item in self.imports],
             "exports": [item.to_dict() for item in self.exports],
             "strings": list(self.strings),
+            "crypto_analysis": dict(self.crypto_analysis),
             "suspicious_apis": list(self.suspicious_apis),
             "protector_findings": list(self.protector_findings),
             "vmprotect_profile": dict(self.vmprotect_profile),
