@@ -13,6 +13,12 @@ from aia_reverse_lab.analyzers.patch_diff import analyze_binary_diff
 from aia_reverse_lab.analyzers.pe_analyzer import PEAnalyzer
 from aia_reverse_lab.reporting.report_generator import write_reports
 from aia_reverse_lab.storage.database import AnalysisDatabase
+from aia_reverse_lab.tools.crypto_transform import (
+    TransformError,
+    read_input_bytes,
+    transform_bytes,
+    write_output_bytes,
+)
 
 console = Console()
 
@@ -28,10 +34,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--diff-original", default=None, help="Original authorized file for safe binary diff mode.")
     parser.add_argument("--diff-modified", default=None, help="Modified authorized file for safe binary diff mode.")
     parser.add_argument("--diff-max-ranges", type=int, default=200, help="Maximum changed ranges to report. Default: 200")
+    parser.add_argument("--transform", default=None, help="Safe transform operation: base64-decode, base64-encode, hex-decode, hex-encode, url-decode, xor")
+    parser.add_argument("--transform-input", default=None, help="Input text for safe transform mode.")
+    parser.add_argument("--transform-input-file", default=None, help="Input file for safe transform mode.")
+    parser.add_argument("--transform-output-file", default=None, help="Optional output file for safe transform mode.")
+    parser.add_argument("--transform-key", default=None, help="User-supplied key for xor transform. Prefix with hex: or utf8: if needed.")
     parser.add_argument("--recent", action="store_true", help="Show recent analyses from the SQLite database and exit.")
     parser.add_argument("--recent-limit", type=int, default=20, help="Number of recent analyses to show with --recent. Default: 20")
     parser.add_argument("--version", action="version", version=f"aia-reverse-lab {__version__}")
     return parser
+
+
+def run_transform_mode(args) -> int:
+    try:
+        data = read_input_bytes(args.transform_input, args.transform_input_file)
+        transformed = transform_bytes(operation=args.transform, data=data, key=args.transform_key)
+        output = write_output_bytes(transformed, args.transform_output_file)
+    except (TransformError, ValueError, OSError) as exc:
+        console.print(f"[red]Transform failed:[/red] {exc}")
+        return 2
+
+    if args.transform_output_file:
+        console.print(f"Transform Output : {output}")
+    else:
+        console.print(output)
+    return 0
 
 
 def print_diff_result(diff: dict) -> None:
@@ -83,11 +110,62 @@ def print_recent(rows: list[dict]) -> None:
     console.print(table)
 
 
+def print_crypto_summary(crypto: dict) -> None:
+    if not crypto:
+        return
+    crypto_table = Table(title="Crypto / Encoding Indicators")
+    crypto_table.add_column("Metric", style="cyan")
+    crypto_table.add_column("Value", style="white")
+    crypto_table.add_row("Crypto APIs", str(crypto.get("crypto_api_count", 0)))
+    crypto_table.add_row("Crypto Constants", str(crypto.get("constant_count", 0)))
+    crypto_table.add_row("Encoded Candidates", str(crypto.get("encoded_candidate_count", 0)))
+    crypto_table.add_row("High Entropy Regions", str(crypto.get("high_entropy_region_count", 0)))
+    console.print(crypto_table)
+
+    if crypto.get("crypto_apis"):
+        api_table = Table(title="Crypto APIs")
+        api_table.add_column("Category", style="cyan")
+        api_table.add_column("DLL", style="white")
+        api_table.add_column("Function", style="white")
+        for item in crypto.get("crypto_apis", [])[:20]:
+            api_table.add_row(str(item.get("category", "")), str(item.get("dll", "")), str(item.get("function", "")))
+        console.print(api_table)
+
+    if crypto.get("constants"):
+        const_table = Table(title="Crypto Constant Markers")
+        const_table.add_column("Name", style="cyan")
+        const_table.add_column("Offset", style="white")
+        const_table.add_column("Length", style="white")
+        for item in crypto.get("constants", [])[:20]:
+            const_table.add_row(str(item.get("name", "")), str(item.get("offset", "")), str(item.get("length", "")))
+        console.print(const_table)
+
+    if crypto.get("encoded_candidates"):
+        enc_table = Table(title="Encoded String Candidates")
+        enc_table.add_column("Kind", style="cyan")
+        enc_table.add_column("Offset", style="white")
+        enc_table.add_column("Length", style="white")
+        enc_table.add_column("Preview", style="white")
+        for item in crypto.get("encoded_candidates", [])[:20]:
+            enc_table.add_row(str(item.get("kind", "")), str(item.get("offset", "")), str(item.get("length", "")), str(item.get("preview", "")))
+        console.print(enc_table)
+
+    if crypto.get("high_entropy_regions"):
+        entropy_table = Table(title="High Entropy Regions")
+        entropy_table.add_column("Offset", style="cyan")
+        entropy_table.add_column("Size", style="white")
+        entropy_table.add_column("Entropy", style="white")
+        for item in crypto.get("high_entropy_regions", [])[:20]:
+            entropy_table.add_row(str(item.get("offset", "")), str(item.get("size", "")), str(item.get("entropy", "")))
+        console.print(entropy_table)
+
+
 def print_summary(result) -> None:
     vmp = result.vmprotect_profile or {}
     features = result.pe_features or {}
     tls = features.get("tls", {})
     entry_permissions = features.get("entry_point_section_permissions", {})
+    crypto = result.crypto_analysis or {}
     summary = Table(title="PE Analysis Summary")
     summary.add_column("Field", style="cyan", no_wrap=True)
     summary.add_column("Value", style="white")
@@ -112,6 +190,10 @@ def print_summary(result) -> None:
     summary.add_row("Exports", str(result.export_count))
     summary.add_row("Overlay", f"{result.overlay_size:,} bytes")
     summary.add_row("Strings", str(len(result.strings)))
+    summary.add_row("Crypto APIs", str(crypto.get("crypto_api_count", 0)))
+    summary.add_row("Crypto Constants", str(crypto.get("constant_count", 0)))
+    summary.add_row("Encoded Candidates", str(crypto.get("encoded_candidate_count", 0)))
+    summary.add_row("High Entropy Regions", str(crypto.get("high_entropy_region_count", 0)))
     summary.add_row("Suspicious APIs", str(len(result.suspicious_apis)))
     summary.add_row("Anti-analysis", str(len(result.anti_analysis_indicators)))
     summary.add_row("Protector Findings", str(len(result.protector_findings)))
@@ -130,6 +212,8 @@ def print_summary(result) -> None:
         for item in features.get("section_anomalies", [])[:20]:
             anomaly_table.add_row(str(item.get("section", "")), str(item.get("category", "")), str(item.get("entropy", "")), str(item.get("description", "")))
         console.print(anomaly_table)
+
+    print_crypto_summary(crypto)
 
     if vmp.get("evidence"):
         vmp_table = Table(title="VMProtect Profile Evidence")
@@ -184,6 +268,9 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
+    if args.transform:
+        return run_transform_mode(args)
+
     if args.diff_original or args.diff_modified:
         if not args.diff_original or not args.diff_modified:
             console.print("[red]Both --diff-original and --diff-modified are required for diff mode.[/red]")
@@ -234,7 +321,7 @@ def main() -> int:
 
     console.print("[bold cyan]AIA Reverse Lab[/bold cyan]")
     print_summary(result)
-    console.print("[green]Step 9.7 deep VMProtect static profile completed.[/green]")
+    console.print("[green]Step 9.8 crypto analysis and safe transform tools completed.[/green]")
     console.print(f"Analysis ID : {analysis_id}")
     console.print(f"Database    : {Path(args.db)}")
     console.print(f"JSON Report : {report_paths['json']}")
