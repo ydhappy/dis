@@ -16,6 +16,7 @@ from aia_reverse_lab.analyzers.disassembler import (
     UnsupportedArchitectureError,
     disassemble_entry_point,
 )
+from aia_reverse_lab.analyzers.exposure_assessor import assess_exposure
 from aia_reverse_lab.analyzers.flow_summary import build_flow_summary
 from aia_reverse_lab.analyzers.pe_features import build_pe_features, decode_section_permissions
 from aia_reverse_lab.analyzers.problem_locator import locate_static_problems
@@ -240,6 +241,7 @@ class PEAnalyzer:
                 warnings=warnings,
             )
             result.problem_locations = locate_static_problems(result)
+            result.exposure_assessment = assess_exposure(result)
             result.data_requirements = analyze_required_data(result)
             return result
         finally:
