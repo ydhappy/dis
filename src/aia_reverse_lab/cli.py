@@ -75,22 +75,19 @@ def print_recent(rows: list[dict]) -> None:
 
     for row in rows:
         table.add_row(
-            str(row["id"]),
-            str(row["created_at"]),
-            str(row["target_path"]),
-            str(row["architecture"]),
-            str(row["sha256"]),
+            str(row["id"]), str(row["created_at"]), str(row["target_path"]), str(row["architecture"]), str(row["sha256"]),
             f"{row.get('risk_score', 0)} / {row.get('risk_severity', 'low')}",
             f"{row.get('vmprotect_classification', 'unknown')} / {row.get('vmprotect_confidence', 0)}",
-            str(row["suspicious_api_count"]),
-            str(row["protector_finding_count"]),
-            str(row.get("yara_match_count", 0)),
+            str(row["suspicious_api_count"]), str(row["protector_finding_count"]), str(row.get("yara_match_count", 0)),
         )
     console.print(table)
 
 
 def print_summary(result) -> None:
     vmp = result.vmprotect_profile or {}
+    features = result.pe_features or {}
+    tls = features.get("tls", {})
+    entry_permissions = features.get("entry_point_section_permissions", {})
     summary = Table(title="PE Analysis Summary")
     summary.add_column("Field", style="cyan", no_wrap=True)
     summary.add_column("Value", style="white")
@@ -104,8 +101,13 @@ def print_summary(result) -> None:
     summary.add_row("Subsystem", result.subsystem)
     summary.add_row("Image Base", result.image_base)
     summary.add_row("Entry Point", result.entry_point)
+    summary.add_row("EntryPoint RVA", str(features.get("entry_point_rva", "")))
+    summary.add_row("EntryPoint Section", str(features.get("entry_point_section", "")))
+    summary.add_row("EntryPoint Perms", json.dumps(entry_permissions, ensure_ascii=False))
     summary.add_row("Compile Time", result.compile_timestamp)
     summary.add_row("Sections", str(result.section_count))
+    summary.add_row("Section Anomalies", str(features.get("section_anomaly_count", 0)))
+    summary.add_row("TLS", f"present={tls.get('present', False)}, callbacks={tls.get('callback_count', 0)}")
     summary.add_row("Imports", str(result.import_count))
     summary.add_row("Exports", str(result.export_count))
     summary.add_row("Overlay", f"{result.overlay_size:,} bytes")
@@ -118,6 +120,16 @@ def print_summary(result) -> None:
     summary.add_row("Flow Blocks", str(result.flow_summary.get("basic_block_count", 0)))
     summary.add_row("Data Coverage", f"{result.data_requirements.get('coverage_percent', 0)}%")
     console.print(summary)
+
+    if features.get("section_anomalies"):
+        anomaly_table = Table(title="PE Section Anomalies")
+        anomaly_table.add_column("Section", style="cyan")
+        anomaly_table.add_column("Category", style="yellow")
+        anomaly_table.add_column("Entropy", style="white")
+        anomaly_table.add_column("Description", style="white")
+        for item in features.get("section_anomalies", [])[:20]:
+            anomaly_table.add_row(str(item.get("section", "")), str(item.get("category", "")), str(item.get("entropy", "")), str(item.get("description", "")))
+        console.print(anomaly_table)
 
     if vmp.get("evidence"):
         vmp_table = Table(title="VMProtect Profile Evidence")
@@ -222,7 +234,7 @@ def main() -> int:
 
     console.print("[bold cyan]AIA Reverse Lab[/bold cyan]")
     print_summary(result)
-    console.print("[green]Step 9.6 VMProtect profile analysis completed.[/green]")
+    console.print("[green]Step 9.7 deep VMProtect static profile completed.[/green]")
     console.print(f"Analysis ID : {analysis_id}")
     console.print(f"Database    : {Path(args.db)}")
     console.print(f"JSON Report : {report_paths['json']}")
