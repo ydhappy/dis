@@ -70,6 +70,7 @@ class PEAnalysisResult:
     protector_findings: list[dict[str, Any]] = field(default_factory=list)
     yara_matches: list[dict[str, Any]] = field(default_factory=list)
     disassembly: list[dict[str, Any]] = field(default_factory=list)
+    risk: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -95,5 +96,6 @@ class PEAnalysisResult:
             "protector_findings": list(self.protector_findings),
             "yara_matches": list(self.yara_matches),
             "disassembly": list(self.disassembly),
+            "risk": dict(self.risk),
             "warnings": list(self.warnings),
         }
