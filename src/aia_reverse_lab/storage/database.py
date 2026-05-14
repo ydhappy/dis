@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS metadata (
@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS analyses (
     suspicious_api_count INTEGER NOT NULL,
     protector_finding_count INTEGER NOT NULL,
     yara_match_count INTEGER NOT NULL DEFAULT 0,
+    risk_score INTEGER NOT NULL DEFAULT 0,
+    risk_severity TEXT NOT NULL DEFAULT 'low',
     json_report_path TEXT NOT NULL,
     html_report_path TEXT NOT NULL,
     full_result_json TEXT NOT NULL
@@ -43,6 +45,7 @@ CREATE TABLE IF NOT EXISTS analyses (
 CREATE INDEX IF NOT EXISTS idx_analyses_sha256 ON analyses(sha256);
 CREATE INDEX IF NOT EXISTS idx_analyses_created_at ON analyses(created_at);
 CREATE INDEX IF NOT EXISTS idx_analyses_target_path ON analyses(target_path);
+CREATE INDEX IF NOT EXISTS idx_analyses_risk_score ON analyses(risk_score);
 """
 
 
@@ -64,6 +67,8 @@ class AnalysisDatabase:
     def insert_analysis(self, result, report_paths: dict[str, Path]) -> int:
         self.initialize()
         result_dict: dict[str, Any] = result.to_dict()
+        risk_score = int(result.risk.get("score", 0))
+        risk_severity = str(result.risk.get("severity", "low"))
         with self._connect() as connection:
             cursor = connection.execute(
                 """
@@ -87,10 +92,12 @@ class AnalysisDatabase:
                     suspicious_api_count,
                     protector_finding_count,
                     yara_match_count,
+                    risk_score,
+                    risk_severity,
                     json_report_path,
                     html_report_path,
                     full_result_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     datetime.now(timezone.utc).isoformat(),
@@ -112,6 +119,8 @@ class AnalysisDatabase:
                     len(result.suspicious_apis),
                     len(result.protector_findings),
                     len(result.yara_matches),
+                    risk_score,
+                    risk_severity,
                     str(report_paths["json"]),
                     str(report_paths["html"]),
                     json.dumps(result_dict, ensure_ascii=False),
@@ -136,6 +145,8 @@ class AnalysisDatabase:
                     suspicious_api_count,
                     protector_finding_count,
                     yara_match_count,
+                    risk_score,
+                    risk_severity,
                     json_report_path,
                     html_report_path
                 FROM analyses
@@ -153,6 +164,12 @@ class AnalysisDatabase:
         if "yara_match_count" not in columns:
             connection.execute(
                 "ALTER TABLE analyses ADD COLUMN yara_match_count INTEGER NOT NULL DEFAULT 0"
+            )
+        if "risk_score" not in columns:
+            connection.execute("ALTER TABLE analyses ADD COLUMN risk_score INTEGER NOT NULL DEFAULT 0")
+        if "risk_severity" not in columns:
+            connection.execute(
+                "ALTER TABLE analyses ADD COLUMN risk_severity TEXT NOT NULL DEFAULT 'low'"
             )
 
     def _connect(self) -> sqlite3.Connection:
