@@ -19,6 +19,7 @@ from aia_reverse_lab.analyzers.flow_summary import build_flow_summary
 from aia_reverse_lab.analyzers.protector_detector import detect_overlay_size, detect_protectors
 from aia_reverse_lab.analyzers.risk_scorer import score_analysis
 from aia_reverse_lab.analyzers.string_analyzer import extract_strings
+from aia_reverse_lab.analyzers.vmprotect_profile import build_vmprotect_profile
 from aia_reverse_lab.analyzers.yara_scanner import YaraUnavailableError, scan_with_yara
 from aia_reverse_lab.models import (
     ExportInfo,
@@ -164,6 +165,18 @@ class PEAnalyzer:
             image_base = pe.OPTIONAL_HEADER.ImageBase
             entry_point_rva = pe.OPTIONAL_HEADER.AddressOfEntryPoint
             entry_point_va = image_base + entry_point_rva
+            entry_point = f"0x{entry_point_va:X}"
+
+            vmprotect_profile = build_vmprotect_profile(
+                sections=sections,
+                imports=imports,
+                strings=strings,
+                protector_findings=protector_findings,
+                anti_analysis_indicators=anti_analysis_indicators,
+                disassembly=disassembly,
+                entry_point=entry_point,
+                overlay_size=overlay_size,
+            )
 
             if not imports:
                 warnings.append("No import table was found or import table is empty.")
@@ -173,6 +186,12 @@ class PEAnalyzer:
                 warnings.append(f"Overlay data detected: {overlay_size:,} bytes.")
             if protector_findings:
                 warnings.append("Packer/protector indicators were detected.")
+            if vmprotect_profile.get("classification") in {"vmprotect_likely", "vmprotect_possible"}:
+                warnings.append(
+                    "VMProtect profile classification: "
+                    f"{vmprotect_profile.get('classification')} "
+                    f"({vmprotect_profile.get('confidence_score', 0)})."
+                )
             if anti_analysis_indicators:
                 warnings.append(f"Anti-analysis indicators detected: {len(anti_analysis_indicators)}.")
             if yara_matches:
@@ -188,7 +207,7 @@ class PEAnalyzer:
                 architecture=machine_to_architecture(machine_value),
                 subsystem=SUBSYSTEM_TYPES.get(subsystem_value, f"unknown-{subsystem_value}"),
                 image_base=f"0x{image_base:X}",
-                entry_point=f"0x{entry_point_va:X}",
+                entry_point=entry_point,
                 compile_timestamp=timestamp_to_iso(pe.FILE_HEADER.TimeDateStamp),
                 section_count=len(sections),
                 import_count=sum(len(item.functions) for item in imports),
@@ -200,6 +219,7 @@ class PEAnalyzer:
                 strings=strings,
                 suspicious_apis=suspicious_apis,
                 protector_findings=protector_findings,
+                vmprotect_profile=vmprotect_profile,
                 yara_matches=yara_matches,
                 disassembly=disassembly,
                 flow_summary=flow_summary,
