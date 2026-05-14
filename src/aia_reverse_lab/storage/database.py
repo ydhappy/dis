@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS metadata (
@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS analyses (
     suspicious_api_count INTEGER NOT NULL,
     protector_finding_count INTEGER NOT NULL,
     yara_match_count INTEGER NOT NULL DEFAULT 0,
+    vmprotect_classification TEXT NOT NULL DEFAULT 'unknown',
+    vmprotect_confidence INTEGER NOT NULL DEFAULT 0,
     risk_score INTEGER NOT NULL DEFAULT 0,
     risk_severity TEXT NOT NULL DEFAULT 'low',
     json_report_path TEXT NOT NULL,
@@ -46,6 +48,7 @@ CREATE INDEX IF NOT EXISTS idx_analyses_sha256 ON analyses(sha256);
 CREATE INDEX IF NOT EXISTS idx_analyses_created_at ON analyses(created_at);
 CREATE INDEX IF NOT EXISTS idx_analyses_target_path ON analyses(target_path);
 CREATE INDEX IF NOT EXISTS idx_analyses_risk_score ON analyses(risk_score);
+CREATE INDEX IF NOT EXISTS idx_analyses_vmprotect_confidence ON analyses(vmprotect_confidence);
 """
 
 
@@ -69,6 +72,8 @@ class AnalysisDatabase:
         result_dict: dict[str, Any] = result.to_dict()
         risk_score = int(result.risk.get("score", 0))
         risk_severity = str(result.risk.get("severity", "low"))
+        vmprotect_classification = str(result.vmprotect_profile.get("classification", "unknown"))
+        vmprotect_confidence = int(result.vmprotect_profile.get("confidence_score", 0) or 0)
         with self._connect() as connection:
             cursor = connection.execute(
                 """
@@ -92,12 +97,14 @@ class AnalysisDatabase:
                     suspicious_api_count,
                     protector_finding_count,
                     yara_match_count,
+                    vmprotect_classification,
+                    vmprotect_confidence,
                     risk_score,
                     risk_severity,
                     json_report_path,
                     html_report_path,
                     full_result_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     datetime.now(timezone.utc).isoformat(),
@@ -119,6 +126,8 @@ class AnalysisDatabase:
                     len(result.suspicious_apis),
                     len(result.protector_findings),
                     len(result.yara_matches),
+                    vmprotect_classification,
+                    vmprotect_confidence,
                     risk_score,
                     risk_severity,
                     str(report_paths["json"]),
@@ -145,6 +154,8 @@ class AnalysisDatabase:
                     suspicious_api_count,
                     protector_finding_count,
                     yara_match_count,
+                    vmprotect_classification,
+                    vmprotect_confidence,
                     risk_score,
                     risk_severity,
                     json_report_path,
@@ -158,19 +169,21 @@ class AnalysisDatabase:
         return [dict(row) for row in rows]
 
     def _migrate(self, connection: sqlite3.Connection) -> None:
-        columns = {
-            row["name"] for row in connection.execute("PRAGMA table_info(analyses)").fetchall()
-        }
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(analyses)").fetchall()}
         if "yara_match_count" not in columns:
+            connection.execute("ALTER TABLE analyses ADD COLUMN yara_match_count INTEGER NOT NULL DEFAULT 0")
+        if "vmprotect_classification" not in columns:
             connection.execute(
-                "ALTER TABLE analyses ADD COLUMN yara_match_count INTEGER NOT NULL DEFAULT 0"
+                "ALTER TABLE analyses ADD COLUMN vmprotect_classification TEXT NOT NULL DEFAULT 'unknown'"
+            )
+        if "vmprotect_confidence" not in columns:
+            connection.execute(
+                "ALTER TABLE analyses ADD COLUMN vmprotect_confidence INTEGER NOT NULL DEFAULT 0"
             )
         if "risk_score" not in columns:
             connection.execute("ALTER TABLE analyses ADD COLUMN risk_score INTEGER NOT NULL DEFAULT 0")
         if "risk_severity" not in columns:
-            connection.execute(
-                "ALTER TABLE analyses ADD COLUMN risk_severity TEXT NOT NULL DEFAULT 'low'"
-            )
+            connection.execute("ALTER TABLE analyses ADD COLUMN risk_severity TEXT NOT NULL DEFAULT 'low'")
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
