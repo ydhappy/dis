@@ -81,6 +81,7 @@ class PEAnalysisResult:
     flow_summary: dict[str, Any] = field(default_factory=dict)
     anti_analysis_indicators: list[dict[str, Any]] = field(default_factory=list)
     problem_locations: dict[str, Any] = field(default_factory=dict)
+    exposure_assessment: dict[str, Any] = field(default_factory=dict)
     data_requirements: dict[str, Any] = field(default_factory=dict)
     risk: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
@@ -114,6 +115,7 @@ class PEAnalysisResult:
             "flow_summary": dict(self.flow_summary),
             "anti_analysis_indicators": list(self.anti_analysis_indicators),
             "problem_locations": dict(self.problem_locations),
+            "exposure_assessment": dict(self.exposure_assessment),
             "data_requirements": dict(self.data_requirements),
             "risk": dict(self.risk),
             "warnings": list(self.warnings),
