@@ -37,6 +37,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional YARA rule file or directory to scan with.",
     )
     parser.add_argument(
+        "--disasm",
+        action="store_true",
+        help="Enable passive static EntryPoint disassembly using optional Capstone.",
+    )
+    parser.add_argument(
+        "--disasm-limit",
+        type=int,
+        default=80,
+        help="Maximum number of EntryPoint instructions to disassemble. Default: 80",
+    )
+    parser.add_argument(
         "--recent",
         action="store_true",
         help="Show recent analyses from the SQLite database and exit.",
@@ -102,6 +113,7 @@ def print_summary(result) -> None:
     summary.add_row("Suspicious APIs", str(len(result.suspicious_apis)))
     summary.add_row("Protector Findings", str(len(result.protector_findings)))
     summary.add_row("YARA Matches", str(len(result.yara_matches)))
+    summary.add_row("Disassembly", f"{len(result.disassembly)} instruction(s)")
 
     console.print(summary)
 
@@ -117,6 +129,19 @@ def print_summary(result) -> None:
                 str(finding.get("reason", "")),
             )
         console.print(protector_table)
+
+    if result.disassembly:
+        disasm_table = Table(title="EntryPoint Disassembly")
+        disasm_table.add_column("Address", style="cyan")
+        disasm_table.add_column("Bytes", style="white")
+        disasm_table.add_column("Instruction", style="green")
+        for item in result.disassembly[:30]:
+            disasm_table.add_row(
+                str(item.get("address", "")),
+                str(item.get("bytes", "")),
+                f"{item.get('mnemonic', '')} {item.get('op_str', '')}".strip(),
+            )
+        console.print(disasm_table)
 
     if result.yara_matches:
         yara_table = Table(title="YARA Matches")
@@ -183,7 +208,12 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        result = PEAnalyzer().analyze(target, yara_rules=args.yara_rules)
+        result = PEAnalyzer().analyze(
+            target,
+            yara_rules=args.yara_rules,
+            disassemble=args.disasm,
+            disasm_limit=args.disasm_limit,
+        )
         report_paths = write_reports(result, output_dir)
         analysis_id = db.insert_analysis(result, report_paths)
     except pefile.PEFormatError as exc:
@@ -195,7 +225,7 @@ def main() -> int:
 
     console.print("[bold cyan]AIA Reverse Lab[/bold cyan]")
     print_summary(result)
-    console.print("[green]Step 7 YARA scanning completed.[/green]")
+    console.print("[green]Step 8 EntryPoint disassembly completed.[/green]")
     console.print(f"Analysis ID : {analysis_id}")
     console.print(f"Database    : {Path(args.db)}")
     console.print(f"JSON Report : {report_paths['json']}")
