@@ -8,6 +8,11 @@ from pathlib import Path
 import pefile
 
 from aia_reverse_lab.analyzers.api_classifier import classify_imports
+from aia_reverse_lab.analyzers.disassembler import (
+    CapstoneUnavailableError,
+    UnsupportedArchitectureError,
+    disassemble_entry_point,
+)
 from aia_reverse_lab.analyzers.protector_detector import detect_overlay_size, detect_protectors
 from aia_reverse_lab.analyzers.string_analyzer import extract_strings
 from aia_reverse_lab.analyzers.yara_scanner import YaraUnavailableError, scan_with_yara
@@ -101,7 +106,13 @@ def machine_to_architecture(machine: int) -> str:
 class PEAnalyzer:
     """PE file analyzer for safe static metadata extraction."""
 
-    def analyze(self, target: str | Path, yara_rules: str | Path | None = None) -> PEAnalysisResult:
+    def analyze(
+        self,
+        target: str | Path,
+        yara_rules: str | Path | None = None,
+        disassemble: bool = False,
+        disasm_limit: int = 80,
+    ) -> PEAnalysisResult:
         path = Path(target)
         warnings: list[str] = []
         file_size = path.stat().st_size
@@ -117,10 +128,18 @@ class PEAnalyzer:
             overlay_size = detect_overlay_size(pe, file_size)
             protector_findings = detect_protectors(sections, imports, strings, overlay_size)
             yara_matches: list[dict] = []
+            disassembly: list[dict] = []
+
             if yara_rules:
                 try:
                     yara_matches = scan_with_yara(path, yara_rules)
                 except YaraUnavailableError as exc:
+                    warnings.append(str(exc))
+
+            if disassemble:
+                try:
+                    disassembly = disassemble_entry_point(path, instruction_limit=max(disasm_limit, 1))
+                except (CapstoneUnavailableError, UnsupportedArchitectureError) as exc:
                     warnings.append(str(exc))
 
             machine_value = pe.FILE_HEADER.Machine
@@ -139,6 +158,8 @@ class PEAnalyzer:
                 warnings.append("Packer/protector indicators were detected.")
             if yara_matches:
                 warnings.append(f"YARA matched {len(yara_matches)} rule(s).")
+            if disassemble and not disassembly:
+                warnings.append("Entry point disassembly did not return any instructions.")
 
             return PEAnalysisResult(
                 path=str(path),
@@ -161,6 +182,7 @@ class PEAnalyzer:
                 suspicious_apis=suspicious_apis,
                 protector_findings=protector_findings,
                 yara_matches=yara_matches,
+                disassembly=disassembly,
                 warnings=warnings,
             )
         finally:
