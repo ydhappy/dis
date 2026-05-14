@@ -10,6 +10,7 @@ from rich.table import Table
 from aia_reverse_lab import __version__
 from aia_reverse_lab.analyzers.pe_analyzer import PEAnalyzer
 from aia_reverse_lab.reporting.report_generator import write_reports
+from aia_reverse_lab.storage.database import AnalysisDatabase
 
 console = Console()
 
@@ -26,11 +27,50 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output directory for analysis reports. Default: reports",
     )
     parser.add_argument(
+        "--db",
+        default="aia_reverse_lab.sqlite3",
+        help="SQLite database path. Default: aia_reverse_lab.sqlite3",
+    )
+    parser.add_argument(
+        "--recent",
+        action="store_true",
+        help="Show recent analyses from the SQLite database and exit.",
+    )
+    parser.add_argument(
+        "--recent-limit",
+        type=int,
+        default=20,
+        help="Number of recent analyses to show with --recent. Default: 20",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"aia-reverse-lab {__version__}",
     )
     return parser
+
+
+def print_recent(rows: list[dict]) -> None:
+    table = Table(title="Recent Analyses")
+    table.add_column("ID", style="cyan", no_wrap=True)
+    table.add_column("Created", style="white")
+    table.add_column("Target", style="white")
+    table.add_column("Arch", style="green")
+    table.add_column("SHA256", style="magenta")
+    table.add_column("Suspicious APIs", style="red")
+    table.add_column("Protector", style="yellow")
+
+    for row in rows:
+        table.add_row(
+            str(row["id"]),
+            str(row["created_at"]),
+            str(row["target_path"]),
+            str(row["architecture"]),
+            str(row["sha256"]),
+            str(row["suspicious_api_count"]),
+            str(row["protector_finding_count"]),
+        )
+    console.print(table)
 
 
 def print_summary(result) -> None:
@@ -95,6 +135,13 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
+    db = AnalysisDatabase(args.db)
+
+    if args.recent:
+        rows = db.list_recent(limit=max(args.recent_limit, 1))
+        print_recent(rows)
+        return 0
+
     if not args.target:
         parser.print_help()
         return 0
@@ -115,6 +162,7 @@ def main() -> int:
     try:
         result = PEAnalyzer().analyze(target)
         report_paths = write_reports(result, output_dir)
+        analysis_id = db.insert_analysis(result, report_paths)
     except pefile.PEFormatError as exc:
         console.print(f"[red]Invalid or unsupported PE file:[/red] {exc}")
         return 3
@@ -124,7 +172,9 @@ def main() -> int:
 
     console.print("[bold cyan]AIA Reverse Lab[/bold cyan]")
     print_summary(result)
-    console.print("[green]Step 5 report generation completed.[/green]")
+    console.print("[green]Step 6 SQLite storage completed.[/green]")
+    console.print(f"Analysis ID : {analysis_id}")
+    console.print(f"Database    : {Path(args.db)}")
     console.print(f"JSON Report : {report_paths['json']}")
     console.print(f"HTML Report : {report_paths['html']}")
     return 0
