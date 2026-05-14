@@ -149,16 +149,6 @@ class PEAnalyzer:
                     warnings.append(str(exc))
 
             flow_summary = build_flow_summary(disassembly)
-            risk = score_analysis(
-                sections=sections,
-                imports=imports,
-                suspicious_apis=suspicious_apis,
-                protector_findings=protector_findings,
-                yara_matches=yara_matches,
-                overlay_size=overlay_size,
-                strings=strings,
-                disassembly=disassembly,
-            )
 
             machine_value = pe.FILE_HEADER.Machine
             subsystem_value = pe.OPTIONAL_HEADER.Subsystem
@@ -176,6 +166,18 @@ class PEAnalyzer:
                 disassembly=disassembly,
                 entry_point=entry_point,
                 overlay_size=overlay_size,
+            )
+
+            risk = score_analysis(
+                sections=sections,
+                imports=imports,
+                suspicious_apis=suspicious_apis,
+                protector_findings=protector_findings,
+                yara_matches=yara_matches,
+                overlay_size=overlay_size,
+                strings=strings,
+                disassembly=disassembly,
+                vmprotect_profile=vmprotect_profile,
             )
 
             if not imports:
