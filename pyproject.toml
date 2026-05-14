@@ -19,6 +19,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+yara = [
+  "yara-python>=4.5.0"
+]
 dev = [
   "pytest>=8.0.0",
   "ruff>=0.4.0"
