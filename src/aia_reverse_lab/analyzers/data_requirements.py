@@ -14,6 +14,16 @@ def analyze_required_data(result) -> dict[str, Any]:
         check("strings", bool(result.strings), "Static strings were extracted."),
         check("suspicious_apis", bool(result.suspicious_apis), "Suspicious API indicators were found."),
         check("protector_findings", bool(result.protector_findings), "Protector/packer indicators were found."),
+        check(
+            "vmprotect_profile",
+            bool(result.vmprotect_profile),
+            "VMProtect profile analysis was generated.",
+        ),
+        check(
+            "vmprotect_evidence",
+            bool(result.vmprotect_profile.get("evidence")),
+            "VMProtect-specific evidence was found.",
+        ),
         check("yara_matches", bool(result.yara_matches), "YARA rules matched, if rules were supplied."),
         check("disassembly", bool(result.disassembly), "EntryPoint disassembly is available."),
         check("flow_summary", bool(result.flow_summary.get("available")), "Static flow summary is available."),
