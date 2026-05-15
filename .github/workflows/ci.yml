@@ -1,4 +1,4 @@
-name: CI
+name: Actions Offline Validation
 
 on:
   push:
@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Python ${{ matrix.python-version }}
+  offline-tools:
+    name: Offline tools / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -29,35 +29,63 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install package
+      - name: Install offline-test dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,disasm]"
 
-      - name: Ruff check
+      - name: Static lint checks
         run: |
           python -m ruff check src tests
 
-      - name: Pytest
+      - name: Unit tests for Actions-feasible tools
         run: |
-          python -m pytest -q
+          python -m pytest -q tests
 
-      - name: CLI smoke test
+      - name: CLI offline smoke tests
         run: |
+          mkdir -p action-smoke
           aia-reverse-lab --version
+          aia-reverse-lab --transform base64-decode --transform-input SGVsbG8=
+          printf 'HEADER:value=1234' > action-smoke/input.bin
+          aia-reverse-lab --dump-view action-smoke/input.bin --dump-offset 0 --dump-length 16 --tool-json action-smoke/dump.json
+          aia-reverse-lab --robustness-input action-smoke/input.bin --robustness-out action-smoke/corpus --robustness-cases 8 --tool-json action-smoke/robustness.json
           python - <<'PY'
           import json
           from pathlib import Path
-          Path('rules.json').write_text(json.dumps({'rules':[{'name':'admin','pattern':'admin','flags':['ignorecase']}]}), encoding='utf-8')
+          Path('action-smoke/rules.json').write_text(
+              json.dumps({'rules': [{'name': 'admin', 'pattern': 'admin', 'flags': ['ignorecase']}]}),
+              encoding='utf-8',
+          )
+          Path('action-smoke/before.jsonl').write_text(
+              json.dumps({'case_id': 1, 'case_path': 'case_0001_edge_byte.bin', 'status': 'crash', 'exit_code': 139}) + '\n',
+              encoding='utf-8',
+          )
+          Path('action-smoke/after.jsonl').write_text(
+              json.dumps({'case_id': 1, 'case_path': 'case_0001_edge_byte.bin', 'status': 'ok', 'exit_code': 0}) + '\n',
+              encoding='utf-8',
+          )
           PY
-          aia-reverse-lab --transform base64-decode --transform-input SGVsbG8=
-          aia-reverse-lab --bypass-sample "admin token" --bypass-rules rules.json --tool-json bypass.json
-          test -f bypass.json
+          aia-reverse-lab --bypass-sample "admin token" --bypass-rules action-smoke/rules.json --tool-json action-smoke/bypass.json
+          aia-reverse-lab --triage-results action-smoke/before.jsonl --tool-json action-smoke/triage.json
+          aia-reverse-lab --regression-before action-smoke/before.jsonl --regression-after action-smoke/after.jsonl --tool-json action-smoke/regression.json
+          test -f action-smoke/dump.json
+          test -f action-smoke/robustness.json
+          test -f action-smoke/bypass.json
+          test -f action-smoke/triage.json
+          test -f action-smoke/regression.json
+
+      - name: Upload offline validation outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: action-smoke-${{ matrix.python-version }}
+          path: action-smoke/**
+          if-no-files-found: error
 
   build:
     name: Build package
     runs-on: ubuntu-latest
-    needs: test
+    needs: offline-tools
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -78,3 +106,4 @@ jobs:
         with:
           name: dist
           path: dist/*
+          if-no-files-found: error
