@@ -2,6 +2,35 @@ from __future__ import annotations
 
 from typing import Any
 
+HIGH_VALUE_STRING_TAGS = {
+    "credential": 85,
+    "process_injection_terms": 80,
+    "driver_kernel_terms": 80,
+    "anti_debug_fields": 70,
+    "anti_analysis": 65,
+    "vm_sandbox": 60,
+    "loader_resolution": 65,
+    "protector_packer": 70,
+    "crypto_material": 60,
+    "script": 60,
+    "registry": 55,
+    "network": 50,
+    "url": 40,
+}
+
+HIGH_VALUE_API_CATEGORIES = {
+    "process_injection": 85,
+    "remote_memory_manipulation": 85,
+    "thread_context_control": 80,
+    "driver_kernel_surface": 80,
+    "process_handle_access": 65,
+    "anti_debug": 65,
+    "native_loader_resolution": 65,
+    "persistence": 60,
+    "network": 55,
+    "crypto": 55,
+}
+
 
 def locate_static_problems(result) -> dict[str, Any]:
     """Locate likely investigation points from safe static/offline analysis data."""
@@ -15,12 +44,13 @@ def locate_static_problems(result) -> dict[str, Any]:
     add_yara_locations(result, locations)
     add_string_locations(result, locations)
     add_api_locations(result, locations)
+    add_attack_surface_cluster_locations(result, locations)
 
     ranked = sorted(locations, key=lambda item: item.get("priority", 0), reverse=True)
     return {
         "location_count": len(ranked),
         "top_priority": ranked[0]["priority"] if ranked else 0,
-        "locations": ranked[:100],
+        "locations": ranked[:150],
         "note": "Problem locations are triage hints from safe static/offline analysis. They are not bypass or patch instructions.",
     }
 
@@ -80,7 +110,7 @@ def add_tls_locations(result, locations: list[dict[str, Any]]) -> None:
     if not tls.get("present"):
         return
     callbacks = tls.get("callbacks", [])
-    priority = 65 if callbacks else 45
+    priority = 70 if callbacks else 45
     locations.append(
         build_location(
             priority=priority,
@@ -144,7 +174,7 @@ def add_vmprotect_locations(result, locations: list[dict[str, Any]]) -> None:
     if score:
         locations.append(
             build_location(
-                priority=min(95, 50 + score // 2),
+                priority=min(98, 50 + score // 2),
                 category="vmprotect_profile",
                 title=f"VMProtect profile: {classification}",
                 address=result.entry_point,
@@ -159,7 +189,7 @@ def add_vmprotect_locations(result, locations: list[dict[str, Any]]) -> None:
             continue
         locations.append(
             build_location(
-                priority=min(90, 40 + points),
+                priority=min(95, 40 + points),
                 category="vmprotect_evidence",
                 title=str(item.get("title", "VMProtect evidence")),
                 address=None,
@@ -186,36 +216,79 @@ def add_yara_locations(result, locations: list[dict[str, Any]]) -> None:
 
 
 def add_string_locations(result, locations: list[dict[str, Any]]) -> None:
-    for item in result.strings[:300]:
+    for item in result.strings[:500]:
         tags = item.get("tags") or []
         if not tags:
             continue
+        tag_details = item.get("tag_details") or []
+        priority = max(HIGH_VALUE_STRING_TAGS.get(str(tag), 40) for tag in tags)
+        detail_preview = "; ".join(
+            f"{detail.get('tag')}:{detail.get('needle')}:{detail.get('severity')}"
+            for detail in tag_details[:5]
+        )
         locations.append(
             build_location(
-                priority=40,
+                priority=priority,
                 category="string_indicator",
                 title="Tagged string indicator",
                 address=str(item.get("offset", "")),
                 section=None,
-                reason=f"tags={','.join(tags)}; value={str(item.get('value', ''))[:120]}",
-                suggested_action="Inspect string references and nearby bytes.",
+                reason=(
+                    f"tags={','.join(str(tag) for tag in tags)}; "
+                    f"details={detail_preview}; value={str(item.get('value', ''))[:120]}"
+                ),
+                suggested_action="Inspect string references and determine whether the indicator is expected, removable, or needs validation/logging.",
             )
         )
 
 
 def add_api_locations(result, locations: list[dict[str, Any]]) -> None:
-    for item in result.suspicious_apis[:100]:
+    for item in result.suspicious_apis[:150]:
+        category = str(item.get("category", ""))
         severity = item.get("severity", "low")
-        priority = {"high": 75, "medium": 55, "low": 35}.get(severity, 35)
+        priority = HIGH_VALUE_API_CATEGORIES.get(category, {"high": 75, "medium": 55, "low": 35}.get(severity, 35))
         locations.append(
             build_location(
                 priority=priority,
                 category="api_indicator",
-                title=f"Suspicious API: {item.get('function', '')}",
+                title=f"Sensitive API: {item.get('function', '')}",
                 address=None,
                 section=None,
-                reason=f"{item.get('dll', '')}!{item.get('function', '')} category={item.get('category', '')}",
-                suggested_action="Review import usage in code flow and determine whether it is expected for this binary.",
+                reason=(
+                    f"{item.get('dll', '')}!{item.get('function', '')} "
+                    f"category={category}; severity={severity}; description={item.get('description', '')}"
+                ),
+                suggested_action="Review whether this API surface is required; add least-privilege, logging, allowlisting, or remove unused capability.",
+            )
+        )
+
+
+def add_attack_surface_cluster_locations(result, locations: list[dict[str, Any]]) -> None:
+    api_categories = {str(item.get("category", "")) for item in result.suspicious_apis}
+    string_tags = {str(tag) for item in result.strings for tag in (item.get("tags") or [])}
+    clusters = []
+
+    if {"process_injection", "remote_memory_manipulation"} & api_categories and "process_injection_terms" in string_tags:
+        clusters.append((90, "process_injection_cluster", "Process injection surface cluster"))
+    if "driver_kernel_surface" in api_categories or "driver_kernel_terms" in string_tags:
+        clusters.append((85, "driver_kernel_cluster", "Driver/kernel interaction surface cluster"))
+    if "anti_debug" in api_categories or {"anti_debug_fields", "anti_analysis"} & string_tags:
+        clusters.append((80, "anti_debug_cluster", "Anti-debug / analysis-awareness cluster"))
+    if "native_loader_resolution" in api_categories or "loader_resolution" in string_tags:
+        clusters.append((75, "loader_resolution_cluster", "Dynamic loader/API resolution cluster"))
+    if "credential" in string_tags:
+        clusters.append((90, "credential_cluster", "Credential-like material string cluster"))
+
+    for priority, category, title in clusters:
+        locations.append(
+            build_location(
+                priority=priority,
+                category=category,
+                title=title,
+                address=None,
+                section=None,
+                reason=f"api_categories={sorted(api_categories)}; string_tags={sorted(string_tags)}",
+                suggested_action="Treat this as a high-priority review cluster and verify the code path, configuration, and expected exposure.",
             )
         )
 
