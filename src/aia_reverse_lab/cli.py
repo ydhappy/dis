@@ -20,6 +20,7 @@ from aia_reverse_lab.tools.dump_viewer import view_binary_range
 from aia_reverse_lab.tools.memory_dump_analyzer import analyze_memory_dump
 from aia_reverse_lab.tools.opcode_viewer import OpcodeViewerError, disassemble_file_range, disassemble_hex_string, parse_integer as parse_opcode_integer
 from aia_reverse_lab.tools.pcap_analyzer import analyze_pcap
+from aia_reverse_lab.tools.regression_guard import compare_triage_results
 from aia_reverse_lab.tools.result_triage import triage_result_file
 from aia_reverse_lab.tools.robustness_tester import generate_robustness_corpus
 
@@ -63,6 +64,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bypass-rules", default=None, help="JSON regex rules for bypass-resilience testing.")
     parser.add_argument("--bypass-max-variants", type=int, default=200, help="Maximum bypass-resilience variants. Default: 200")
     parser.add_argument("--triage-results", default=None, help="Triage JSON/JSONL corpus execution results.")
+    parser.add_argument("--regression-before", default=None, help="Before-fix result or triage JSON/JSONL for regression guard.")
+    parser.add_argument("--regression-after", default=None, help="After-fix result or triage JSON/JSONL for regression guard.")
+    parser.add_argument("--regression-allow-new-unknown", action="store_true", help="Allow new unknown-only failures in regression guard.")
     parser.add_argument("--tool-json", default=None, help="Optional path to save viewer/tool JSON output.")
     parser.add_argument("--transform", default=None, help="Safe transform operation: base64-decode, base64-encode, hex-decode, hex-encode, url-decode, xor")
     parser.add_argument("--transform-input", default=None, help="Input text for safe transform mode.")
@@ -81,6 +85,82 @@ def save_tool_json(payload: dict, path: str | None) -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         console.print(f"JSON Output : {output}")
+
+
+def run_regression_mode(args) -> int:
+    if not args.regression_before or not args.regression_after:
+        console.print("[red]Both --regression-before and --regression-after are required.[/red]")
+        return 2
+    try:
+        result = compare_triage_results(
+            args.regression_before,
+            args.regression_after,
+            allow_new_unknown=args.regression_allow_new_unknown,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        console.print(f"[red]Regression guard failed:[/red] {exc}")
+        return 2
+
+    summary = Table(title="Regression Guard")
+    summary.add_column("Metric")
+    summary.add_column("Value")
+    summary.add_row("Decision", str(result.get("decision", "")))
+    summary.add_row("Before Failures", str(result.get("before", {}).get("failure_count", 0)))
+    summary.add_row("After Failures", str(result.get("after", {}).get("failure_count", 0)))
+    summary.add_row("Failure Delta", str(result.get("deltas", {}).get("failure_count", 0)))
+    summary.add_row("Fail Rate Delta", str(result.get("deltas", {}).get("fail_rate", 0)))
+    summary.add_row("New Failures", str(result.get("new_failure_count", 0)))
+    summary.add_row("Resolved Failures", str(result.get("resolved_failure_count", 0)))
+    summary.add_row("Persistent Failures", str(result.get("persistent_failure_count", 0)))
+    console.print(summary)
+
+    if result.get("gate_failures"):
+        table = Table(title="Gate Failures")
+        table.add_column("Reason")
+        for reason in result.get("gate_failures", []):
+            table.add_row(str(reason))
+        console.print(table)
+
+    if result.get("new_failures"):
+        table = Table(title="New Failing Cases")
+        for column in ["Case", "Mutation", "Status", "Severity", "Exit", "Duration", "Tags", "Path"]:
+            table.add_column(column)
+        for item in result.get("new_failures", [])[:20]:
+            table.add_row(
+                str(item.get("case_id", "")),
+                str(item.get("mutation", "")),
+                str(item.get("status", "")),
+                str(item.get("severity", "")),
+                str(item.get("exit_code", "")),
+                str(item.get("duration_ms", "")),
+                ",".join(item.get("tags", [])),
+                str(item.get("case_path", "")),
+            )
+        console.print(table)
+
+    if result.get("resolved_failures"):
+        table = Table(title="Resolved Failing Cases")
+        for column in ["Case", "Mutation", "Previous Status", "Previous Severity", "Path"]:
+            table.add_column(column)
+        for item in result.get("resolved_failures", [])[:20]:
+            table.add_row(
+                str(item.get("case_id", "")),
+                str(item.get("mutation", "")),
+                str(item.get("status", "")),
+                str(item.get("severity", "")),
+                str(item.get("case_path", "")),
+            )
+        console.print(table)
+
+    if result.get("remediation_hints"):
+        table = Table(title="Regression Remediation Hints")
+        table.add_column("Hint")
+        for hint in result.get("remediation_hints", []):
+            table.add_row(str(hint))
+        console.print(table)
+
+    save_tool_json(result, args.tool_json)
+    return 0 if result.get("passed") else 1
 
 
 def run_triage_mode(args) -> int:
@@ -349,6 +429,8 @@ def print_summary(result) -> None:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if args.regression_before or args.regression_after:
+        return run_regression_mode(args)
     if args.triage_results:
         return run_triage_mode(args)
     if args.bypass_sample or args.bypass_sample_file:
